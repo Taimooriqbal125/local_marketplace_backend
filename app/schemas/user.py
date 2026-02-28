@@ -12,6 +12,7 @@ Why separate from the SQLAlchemy model?
 from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime
 from typing import Optional
+from uuid import UUID
 
 
 # ---------- Request Schemas (what the client sends) ----------
@@ -41,7 +42,7 @@ class UserResponse(BaseModel):
     The public representation of a User.
     Notice: NO password field here — we never expose that.
     """
-    id: int
+    id: UUID
     name: str
     email: str
     is_active: bool

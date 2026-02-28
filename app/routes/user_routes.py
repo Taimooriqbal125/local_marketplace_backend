@@ -37,7 +37,11 @@ def login(db: Session = Depends(get_db), form_data: OAuth2PasswordRequestForm = 
     FastAPI's OAuth2PasswordRequestForm expects 'username' (we use email) and 'password'.
     """
     # 1. Fetch user
-    user = user_service.user_repo.get_user_by_email(db, email=form_data.username)
+    try:
+        user = user_service.get_user_by_email(db, email=form_data.username)
+    except HTTPException:
+        user = None
+    
     if not user or not security.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
