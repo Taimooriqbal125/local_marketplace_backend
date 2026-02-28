@@ -46,6 +46,20 @@ def create_user(db: Session, user_data: UserCreate) -> User:
     return user_repo.create_user(db, new_user)
 
 
+def get_user_by_email(db: Session, email: str) -> User:
+    """
+    Get a user by email.
+    Raises 404 if not found.
+    """
+    user = user_repo.get_user_by_email(db, email)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    return user
+
+
 def get_user(db: Session, user_id: int) -> User:
     """
     Get a user by ID.
