@@ -67,18 +67,25 @@ def get_current_user(
 
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        print(f"DEBUG: Decoded Payload: {payload}")  # Debug print
         user_id: str | None = payload.get("sub")
         if not user_id:
+            print("DEBUG: Missing 'sub' in payload")
             raise credentials_exception
 
         # Validate UUID format
         user_uuid = uuid.UUID(user_id)
 
-    except (JWTError, ValueError):
+    except JWTError as e:
+        print(f"DEBUG: JWT Decode Error: {e}")
+        raise credentials_exception
+    except ValueError as e:
+        print(f"DEBUG: UUID Conversion Error: {e}")
         raise credentials_exception
 
     user = user_repo.get_user_by_id(db, user_id=user_uuid)
     if user is None:
+        print(f"DEBUG: User not found in DB: {user_uuid}")
         raise credentials_exception
 
     return user

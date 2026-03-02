@@ -23,6 +23,9 @@ class Profile(Base):
     # bio (text) — Optional
     bio = Column(String, nullable=True)
 
+    # sellercompleted order 
+    sellerCompletedOrdersCount = Column(Integer, nullable=False, server_default=text("0"))
+
     # photoUrl (string) — Optional
     photoUrl = Column(String(500), nullable=True)
 

@@ -7,13 +7,14 @@ Why a separate repository?
   - Makes it easy to swap databases or add caching later
 """
 
+import uuid
 from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.models.user import User
 
 
-def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
+def get_user_by_id(db: Session, user_id: uuid.UUID) -> Optional[User]:
     """Fetch a single user by primary key."""
     return db.query(User).filter(User.id == user_id).first()
 

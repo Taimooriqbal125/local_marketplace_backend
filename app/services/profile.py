@@ -49,6 +49,7 @@ def create_profile(db: Session, profile_data: ProfileCreate) -> Profile:
         isBanned=profile_data.isBanned,
         sellerRatingAvg=profile_data.sellerRatingAvg or Decimal("0.00"),
         sellerRatingCount=profile_data.sellerRatingCount or 0,
+        sellerCompletedOrdersCount=profile_data.sellerCompletedOrdersCount or 0,
     )
     return profile_repo.create_profile(db, new_profile)
 

@@ -15,6 +15,7 @@ class ProfileBase(BaseModel):
     bio: Optional[str] = None
     photoUrl: Optional[str] = Field(default=None, max_length=500)
     sellerStatus: Literal["none", "active", "suspended"] = "none"
+    sellerCompletedOrdersCount: Optional[int] = 0
     lastLocation: Optional[str] = Field(default=None, max_length=50)
     isBanned: bool = False
 
@@ -34,6 +35,7 @@ class ProfileUpdate(BaseModel):
     bio: Optional[str] = None
     photoUrl: Optional[str] = Field(default=None, max_length=500)
     sellerStatus: Optional[Literal["none", "active", "suspended"]] = None
+    sellerCompletedOrdersCount: Optional[int] = Field(default=None, ge=0)
     lastLocation: Optional[str] = Field(default=None, max_length=50)
     isBanned: Optional[bool] = None
     sellerRatingAvg: Optional[Decimal] = Field(default=None, ge=0, le=9.99)
@@ -46,6 +48,7 @@ class ProfileResponse(ProfileBase):
     userId: UUID
     sellerRatingAvg: Decimal
     sellerRatingCount: int
+    sellerCompletedOrdersCount: int
     createdAt: datetime
     updatedAt: datetime
     name: str

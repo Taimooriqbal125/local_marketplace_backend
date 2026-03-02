@@ -1,0 +1,81 @@
+"""
+Review Routes — API endpoints for reviews.
+"""
+
+import uuid
+from typing import List
+
+from fastapi import APIRouter, Depends, status
+from sqlalchemy.orm import Session
+
+from app.db.session import get_db
+from app.core.security import get_current_user
+from app.models.user import User
+from app.schemas.review import ReviewCreate, ReviewResponse
+from app.services.review_service import ReviewService
+
+router = APIRouter(prefix="/reviews", tags=["Reviews"])
+
+
+@router.post("/", response_model=ReviewResponse, status_code=status.HTTP_201_CREATED)
+def create_review(
+    obj_in: ReviewCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Leave a review for an order.
+    
+    Validation:
+    - Order must be completed.
+    - User must be a participant in the order.
+    - User cannot review the same order twice.
+    """
+    service = ReviewService(db)
+    return service.create_review(obj_in, current_user.id)
+
+
+@router.get("/received/{user_id}", response_model=List[ReviewResponse])
+def get_received_reviews(
+    user_id: uuid.UUID,
+    skip: int = 0,
+    limit: int = 20,
+    db: Session = Depends(get_db)
+):
+    """Get all reviews received by a specific user."""
+    service = ReviewService(db)
+    return service.list_received_reviews(user_id, skip=skip, limit=limit)
+
+
+@router.get("/given/{user_id}", response_model=List[ReviewResponse])
+def get_given_reviews(
+    user_id: uuid.UUID,
+    skip: int = 0,
+    limit: int = 20,
+    db: Session = Depends(get_db)
+):
+    """Get all reviews written by a specific user."""
+    service = ReviewService(db)
+    return service.list_given_reviews(user_id, skip=skip, limit=limit)
+
+
+@router.get("/{id}", response_model=ReviewResponse)
+def get_review(
+    id: uuid.UUID,
+    db: Session = Depends(get_db)
+):
+    """Fetch details of a single review."""
+    service = ReviewService(db)
+    return service.get_review(id)
+
+
+@router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_review(
+    id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Delete a review. Only the author can perform this action."""
+    service = ReviewService(db)
+    service.delete_review(id, current_user.id)
+    return None

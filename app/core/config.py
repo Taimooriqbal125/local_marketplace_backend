@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite:///./app_v2.db"
     SECRET_KEY: str = "your-super-secret-key-change-in-production"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 14440 # 10 days  
 
     class Config:
         env_file = ".env"

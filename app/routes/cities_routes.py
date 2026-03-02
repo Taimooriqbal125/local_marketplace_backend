@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from app.services.cities_services import CityService, DuplicateCityError
+from app.services.cities_service import CityService, DuplicateCityError
 from app.schemas.cities import CityCreate, CityUpdate, CityOut
 from app.db.session import get_db
 from typing import List
