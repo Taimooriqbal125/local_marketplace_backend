@@ -15,10 +15,11 @@ from typing import Generator
 from app.core.config import settings
 
 # ---------- Engine ----------
-# connect_args is only needed for SQLite (it's single-threaded by default)
 engine = create_engine(
     settings.DATABASE_URL,
-    connect_args={"check_same_thread": False}  # remove this line if using PostgreSQL
+    pool_pre_ping=True,   # detect dropped connections automatically
+    pool_size=10,
+    max_overflow=20,
 )
 
 # ---------- Session Factory ----------

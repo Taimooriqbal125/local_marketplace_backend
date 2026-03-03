@@ -12,6 +12,7 @@ from typing import Optional
 from uuid import UUID
 
 from app.models.profile import Profile
+from geoalchemy2.elements import WKTElement
 
 
 def get_profile_by_user_id(db: Session, user_id: UUID) -> Optional[Profile]:
@@ -26,19 +27,28 @@ def get_all_profiles(db: Session, skip: int = 0, limit: int = 100) -> list[Profi
 
 def create_profile(db: Session, profile: Profile) -> Profile:
     """Insert a new profile into the database."""
+    # Note: If the profile object already has WKTElement fields, this works fine.
+    # If we were building it from a schema here, we'd need conversion.
+    # Usually, Service layer builds the Profile object.
     db.add(profile)
     db.commit()
-    db.refresh(profile)  # reload to get the auto-generated timestamps, etc.
+    db.refresh(profile)
     return profile
 
 
 def update_profile(db: Session, db_profile: Profile, update_data: dict) -> Profile:
     """
     Apply a dict of changes to an existing profile.
-    Only keys present in update_data are updated.
+    Converts LocationPoint dicts to PostGIS WKTElement before writing.
     """
     for key, value in update_data.items():
+        if key in ("last_location_point", "default_location_point") and isinstance(value, dict):
+            lat = value.get("latitude")
+            lon = value.get("longitude")
+            if lat is not None and lon is not None:
+                value = WKTElement(f"POINT({lon} {lat})", srid=4326)
         setattr(db_profile, key, value)
+
     db.commit()
     db.refresh(db_profile)
     return db_profile

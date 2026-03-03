@@ -12,6 +12,7 @@ The service:
   ❌ Does NOT know about HTTP requests/responses (that's the route's job)
 """
 
+import uuid
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 
@@ -60,7 +61,7 @@ def get_user_by_email(db: Session, email: str) -> User:
     return user
 
 
-def get_user(db: Session, user_id: int) -> User:
+def get_user(db: Session, user_id: uuid.UUID) -> User:
     """
     Get a user by ID.
     Raises 404 if not found.
@@ -79,7 +80,7 @@ def get_all_users(db: Session, skip: int = 0, limit: int = 100) -> list[User]:
     return user_repo.get_all_users(db, skip=skip, limit=limit)
 
 
-def update_user(db: Session, user_id: int, user_data: UserUpdate) -> User:
+def update_user(db: Session, user_id: uuid.UUID, user_data: UserUpdate) -> User:
     """
     Update a user's info.
     Only fields that are sent get updated (partial update).
@@ -96,7 +97,7 @@ def update_user(db: Session, user_id: int, user_data: UserUpdate) -> User:
     return user_repo.update_user(db, db_user, update_data)
 
 
-def delete_user(db: Session, user_id: int) -> None:
+def delete_user(db: Session, user_id: uuid.UUID) -> None:
     """
     Delete a user by ID.
     Raises 404 if the user doesn't exist.

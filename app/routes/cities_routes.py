@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
-from app.services.cities_service import CityService, DuplicateCityError
+from app.services.cities_service import CityService
 from app.schemas.cities import CityCreate, CityUpdate, CityOut
 from app.db.session import get_db
+from app.core.security import get_current_admin_user
+from app.models.user import User
 from typing import List
 import uuid
 
@@ -31,18 +32,21 @@ def get_city_by_slug(slug: str, db: Session = Depends(get_db)):
 	return city
 
 @router.post("/", response_model=CityOut, status_code=status.HTTP_201_CREATED)
-def create_city(obj_in: CityCreate, db: Session = Depends(get_db)):
+def create_city(
+	obj_in: CityCreate,
+	db: Session = Depends(get_db),
+	_: User = Depends(get_current_admin_user),
+):
 	service = CityService(db)
-	try:
-		return service.create_city(obj_in)
-	except DuplicateCityError as e:
-		raise HTTPException(
-			status_code=status.HTTP_409_CONFLICT,
-			detail=str(e)
-		)
+	return service.create_city(obj_in)
 
 @router.patch("/{city_id}", response_model=CityOut)
-def update_city(city_id: uuid.UUID, obj_in: CityUpdate, db: Session = Depends(get_db)):
+def update_city(
+	city_id: uuid.UUID,
+	obj_in: CityUpdate,
+	db: Session = Depends(get_db),
+	_: User = Depends(get_current_admin_user),
+):
 	service = CityService(db)
 	city = service.update_city(city_id, obj_in)
 	if not city:
@@ -50,7 +54,11 @@ def update_city(city_id: uuid.UUID, obj_in: CityUpdate, db: Session = Depends(ge
 	return city
 
 @router.delete("/{city_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_city(city_id: uuid.UUID, db: Session = Depends(get_db)):
+def delete_city(
+	city_id: uuid.UUID,
+	db: Session = Depends(get_db),
+	_: User = Depends(get_current_admin_user),
+):
 	service = CityService(db)
 	success = service.delete_city(city_id)
 	if not success:

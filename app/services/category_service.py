@@ -1,4 +1,6 @@
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+from fastapi import HTTPException, status
 from app.repositories.category_repo import CategoryRepository
 from app.schemas.category import CategoryCreate, CategoryUpdate, CategoryOut, CategoryTreeOut
 from app.models.category import Category
@@ -25,7 +27,19 @@ class CategoryService:
         return [CategoryOut.model_validate(cat) for cat in categories]
 
     def create_category(self, obj_in: CategoryCreate) -> CategoryOut:
-        category = self.repo.create(obj_in)
+        # Pre-check: slug must be unique
+        if self.repo.get_by_slug(obj_in.slug):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"A category with slug '{obj_in.slug}' already exists.",
+            )
+        try:
+            category = self.repo.create(obj_in)
+        except IntegrityError:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A category with this slug or name already exists.",
+            )
         return CategoryOut.model_validate(category)
 
     def update_category(self, category_id: int, obj_in: CategoryUpdate) -> CategoryOut | None:

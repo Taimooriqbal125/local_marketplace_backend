@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     Values are auto-loaded from the .env file at the project root.
     """
 
-    DATABASE_URL: str = "sqlite:///./app_v2.db"
+    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/local_marketplace"
     SECRET_KEY: str = "your-super-secret-key-change-in-production"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 14440 # 10 days  

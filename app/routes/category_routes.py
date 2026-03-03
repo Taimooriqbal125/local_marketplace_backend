@@ -3,6 +3,8 @@ from sqlalchemy.orm import Session
 from app.services.category_service import CategoryService
 from app.schemas.category import CategoryCreate, CategoryUpdate, CategoryOut, CategoryTreeOut
 from app.db.session import get_db
+from app.core.security import get_current_admin_user
+from app.models.user import User
 from typing import List
 
 router = APIRouter(prefix="/categories", tags=["categories"])
@@ -29,12 +31,21 @@ def get_category_by_slug(slug: str, db: Session = Depends(get_db)):
     return category
 
 @router.post("/", response_model=CategoryOut, status_code=status.HTTP_201_CREATED)
-def create_category(obj_in: CategoryCreate, db: Session = Depends(get_db)):
+def create_category(
+    obj_in: CategoryCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_admin_user),
+):
     service = CategoryService(db)
     return service.create_category(obj_in)
 
 @router.patch("/{category_id}", response_model=CategoryOut)
-def update_category(category_id: int, obj_in: CategoryUpdate, db: Session = Depends(get_db)):
+def update_category(
+    category_id: int,
+    obj_in: CategoryUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_admin_user),
+):
     service = CategoryService(db)
     category = service.update_category(category_id, obj_in)
     if not category:
@@ -42,7 +53,11 @@ def update_category(category_id: int, obj_in: CategoryUpdate, db: Session = Depe
     return category
 
 @router.delete("/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_category(category_id: int, db: Session = Depends(get_db)):
+def delete_category(
+    category_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_admin_user),
+):
     service = CategoryService(db)
     success = service.delete_category(category_id)
     if not success:

@@ -29,9 +29,8 @@ class ReviewService:
         Business Rules:
         1. Order must exist.
         2. Order must be in 'completed' status.
-        3. Reviewer must be either the Buyer or the Seller of the order.
-        4. User cannot review themselves (enforced by role check).
-        5. User cannot review the same order twice (enforced by DB unique constraint).
+        3. Reviewer must be the Buyer of the order (Sellers cannot review).
+        4. User cannot review the same order twice (enforced by DB unique constraint).
         """
         # 1. Fetch the order
         order = self.order_repo.get(obj_in.orderId)
@@ -49,18 +48,17 @@ class ReviewService:
                 detail="You can only review an order after it has been completed"
             )
 
-        # 3. Verify ownership and identify the recipient (reviewedUserId)
+        # 3. Verify ownership: ONLY the buyer can leave a review
         is_buyer = order.buyerId == current_user_id
-        is_seller = order.sellerId == current_user_id
 
-        if not (is_buyer or is_seller):
+        if not is_buyer:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="You are not authorized to review this order"
+                detail="Only the buyer of an order is authorized to leave a review"
             )
 
-        # Auto-discover reviewedUserId
-        reviewed_user_id = order.sellerId if is_buyer else order.buyerId
+        # Auto-discover reviewedUserId (always the seller since only buyer reviews)
+        reviewed_user_id = order.sellerId
 
         # 4. Check for duplicate review (Prevent 500 error from DB constraint)
         existing_reviews = self.repo.get_by_order(obj_in.orderId)

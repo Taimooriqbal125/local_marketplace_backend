@@ -1,10 +1,5 @@
 """
 ServiceListing Repository — the *only* layer that talks to the DB for listings.
-
-Responsibilities:
-  - Raw ORM queries (select, insert, update, delete)
-  - Filtering / pagination helpers
-  - No business logic — that belongs in the service layer
 """
 
 from __future__ import annotations
@@ -12,10 +7,19 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
+import sqlalchemy as sa
+from geoalchemy2.elements import WKTElement
+from geoalchemy2.functions import ST_DWithin, ST_Distance
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.service_listing import ServiceListing
 from app.schemas.services_listing import ServiceListingCreate, ServiceListingUpdate
+
+
+def _to_wkt(lat: float, lon: float) -> WKTElement:
+    """Convert lat/lon → PostGIS WKTElement. Note: PostGIS is (lon lat) order."""
+    return WKTElement(f"POINT({lon} {lat})", srid=4326)
 
 
 class ServiceListingRepository:
@@ -27,7 +31,6 @@ class ServiceListingRepository:
     # ── Single-record Lookups ────────────────────────────────────────────────
 
     def get(self, listing_id: uuid.UUID) -> Optional[ServiceListing]:
-        """Fetch a listing by its primary key; returns None if not found."""
         return (
             self.db.query(ServiceListing)
             .filter(ServiceListing.id == listing_id)
@@ -37,10 +40,6 @@ class ServiceListingRepository:
     def get_by_seller_and_id(
         self, listing_id: uuid.UUID, seller_id: uuid.UUID
     ) -> Optional[ServiceListing]:
-        """
-        Fetch a listing only if it belongs to a specific seller.
-        Used in ownership-guarded update / delete endpoints.
-        """
         return (
             self.db.query(ServiceListing)
             .filter(
@@ -53,7 +52,6 @@ class ServiceListingRepository:
     # ── Collection Queries ───────────────────────────────────────────────────
 
     def get_all(self, skip: int = 0, limit: int = 20) -> list[ServiceListing]:
-        """Return a paginated list of ALL listings (admin use)."""
         return (
             self.db.query(ServiceListing)
             .order_by(ServiceListing.createdAt.desc())
@@ -63,12 +61,8 @@ class ServiceListingRepository:
         )
 
     def get_by_seller(
-        self,
-        seller_id: uuid.UUID,
-        skip: int = 0,
-        limit: int = 20,
+        self, seller_id: uuid.UUID, skip: int = 0, limit: int = 20
     ) -> list[ServiceListing]:
-        """Return all listings belonging to a specific seller, newest first."""
         return (
             self.db.query(ServiceListing)
             .filter(ServiceListing.sellerId == seller_id)
@@ -79,12 +73,8 @@ class ServiceListingRepository:
         )
 
     def get_by_category(
-        self,
-        category_id: int,
-        skip: int = 0,
-        limit: int = 20,
+        self, category_id: int, skip: int = 0, limit: int = 20
     ) -> list[ServiceListing]:
-        """Return active listings for a given category, newest first."""
         return (
             self.db.query(ServiceListing)
             .filter(
@@ -98,12 +88,8 @@ class ServiceListingRepository:
         )
 
     def get_by_city(
-        self,
-        city_id: uuid.UUID,
-        skip: int = 0,
-        limit: int = 20,
+        self, city_id: uuid.UUID, skip: int = 0, limit: int = 20
     ) -> list[ServiceListing]:
-        """Return active listings for a given city (MVP filter)."""
         return (
             self.db.query(ServiceListing)
             .filter(
@@ -126,10 +112,6 @@ class ServiceListingRepository:
         skip: int = 0,
         limit: int = 20,
     ) -> tuple[list[ServiceListing], int]:
-        """
-        Flexible multi-filter query used by the public browse endpoint.
-        Returns (results, total_count) for pagination metadata.
-        """
         query = self.db.query(ServiceListing)
 
         if status is not None:
@@ -150,6 +132,70 @@ class ServiceListingRepository:
         )
         return results, total
 
+    # ── ✅ Proximity Search ───────────────────────────────────────────────────
+
+    def get_nearby(
+        self,
+        *,
+        latitude: float,
+        longitude: float,
+        radius_km: float,
+        category_id: Optional[int] = None,
+        skip: int = 0,
+        limit: int = 20,
+    ) -> tuple[list[tuple[ServiceListing, float]], int]:
+        """
+        Find active listings where the customer's location falls within
+        the service's coverage radius.
+
+        Logic:
+            ST_DWithin(service_location, customer_point, serviceRadiusKm * 1000)
+
+        Returns: list of (ServiceListing, distance_km) tuples, sorted closest first.
+        """
+        customer_point = _to_wkt(latitude, longitude)
+
+        # Distance in meters from customer to service location point
+        distance_m = ST_Distance(
+            ServiceListing.service_location,
+            customer_point,
+        )
+
+        query = (
+            self.db.query(
+                ServiceListing,
+                # Cast ST_Distance (double precision) → Numeric, then divide by 1000 for km
+                func.round(
+                    func.cast(distance_m, sa.Numeric(12, 4)) / 1000, 2
+                ).label("distance_km"),
+            )
+            .filter(
+                # Only active listings
+                ServiceListing.status == "active",
+                # Only listings that HAVE a location point set
+                ServiceListing.service_location.isnot(None),
+                # ✅ Core proximity check:
+                # Customer must be within the SERVICE's defined coverage radius
+                ST_DWithin(
+                    ServiceListing.service_location,
+                    customer_point,
+                    ServiceListing.serviceRadiusKm * 1000,  # km → meters
+                ),
+            )
+        )
+
+        if category_id is not None:
+            query = query.filter(ServiceListing.categoryId == category_id)
+
+        total = query.count()
+        results = (
+            query.order_by("distance_km")  # closest first
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+        return results, total
+
     # ── Write Operations ─────────────────────────────────────────────────────
 
     def create(
@@ -159,8 +205,16 @@ class ServiceListingRepository:
     ) -> ServiceListing:
         """
         Insert a new listing.
-        seller_id is passed explicitly — never taken from the request body.
+        Converts service_location_point → WKTElement for PostGIS storage.
         """
+        # ✅ Convert lat/lon → PostGIS WKTElement if provided
+        geo_point = None
+        if obj_in.service_location_point is not None:
+            geo_point = _to_wkt(
+                obj_in.service_location_point.latitude,
+                obj_in.service_location_point.longitude,
+            )
+
         db_obj = ServiceListing(
             sellerId=seller_id,
             cityId=obj_in.cityId,
@@ -172,6 +226,7 @@ class ServiceListingRepository:
             isNegotiable=obj_in.isNegotiable,
             serviceLocation=obj_in.serviceLocation,
             serviceRadiusKm=obj_in.serviceRadiusKm,
+            service_location=geo_point,  # ✅ PostGIS Geography
             status=obj_in.status,
         )
         self.db.add(db_obj)
@@ -185,25 +240,32 @@ class ServiceListingRepository:
         obj_in: ServiceListingUpdate,
     ) -> ServiceListing:
         """
-        Apply partial updates to an existing listing.
-        Uses model_dump(exclude_unset=True) so only provided fields are touched.
+        Apply partial updates. Handles service_location_point → WKTElement conversion.
         """
         update_data = obj_in.model_dump(exclude_unset=True)
+
+        # ✅ Handle geography field separately — needs WKTElement conversion
+        location_point = update_data.pop("service_location_point", None)
+        if location_point is not None:
+            db_obj.service_location = _to_wkt(
+                location_point["latitude"],
+                location_point["longitude"],
+            )
+
         for field, value in update_data.items():
             setattr(db_obj, field, value)
+
         self.db.commit()
         self.db.refresh(db_obj)
         return db_obj
 
     def delete(self, db_obj: ServiceListing) -> None:
-        """Hard-delete a listing from the database."""
         self.db.delete(db_obj)
         self.db.commit()
 
     # ── Count Helpers ────────────────────────────────────────────────────────
 
     def count_by_seller(self, seller_id: uuid.UUID) -> int:
-        """Total number of listings owned by a seller (all statuses)."""
         return (
             self.db.query(ServiceListing)
             .filter(ServiceListing.sellerId == seller_id)
@@ -213,7 +275,6 @@ class ServiceListingRepository:
     def get_by_title_and_description(
         self, title: str, description: Optional[str]
     ) -> Optional[ServiceListing]:
-        """Fetch a listing by its title and description to check for uniqueness."""
         return (
             self.db.query(ServiceListing)
             .filter(

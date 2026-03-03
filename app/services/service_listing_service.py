@@ -16,11 +16,14 @@ from typing import Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-
 from app.repositories.service_listing_repo import ServiceListingRepository
+from app.repositories.profile_repo import get_profile_by_user_id
+from geoalchemy2.shape import to_shape
 from app.schemas.services_listing import (
     ServiceListingCreate,
     ServiceListingListResponse,
+    ServiceListingNearbyListResponse,
+    ServiceListingNearbyResponse,
     ServiceListingResponse,
     ServiceListingUpdate,
 )
@@ -286,3 +289,80 @@ class ServiceListingService:
         update = ServiceListingUpdate(status="banned")
         updated = self.repo.update(listing, update)
         return ServiceListingResponse.model_validate(updated)
+
+    # ── Nearby Search ────────────────────────────────────────────────────────
+
+    def search_nearby(
+        self,
+        *,
+        latitude: float,
+        longitude: float,
+        radius_km: float = 10.0,
+        category_id: Optional[int] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> ServiceListingNearbyListResponse:
+        """
+        Find active listings whose coverage radius includes the given point.
+        Returns results sorted closest-first with distance_km attached.
+        """
+        skip = (page - 1) * page_size
+        results, total = self.repo.get_nearby(
+            latitude=latitude,
+            longitude=longitude,
+            radius_km=radius_km,
+            category_id=category_id,
+            skip=skip,
+            limit=page_size,
+        )
+        items = [
+            ServiceListingNearbyResponse(
+                **ServiceListingResponse.model_validate(listing).model_dump(),
+                distance_km=float(distance_km),
+            )
+            for listing, distance_km in results
+        ]
+        return ServiceListingNearbyListResponse(
+            total=total,
+            page=page,
+            pageSize=page_size,
+            radius_km=radius_km,
+            results=items,
+        )
+
+    def search_nearby_from_profile(
+        self,
+        *,
+        user_id: uuid.UUID,
+        db: Session,
+        radius_km: float = 10.0,
+        category_id: Optional[int] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> ServiceListingNearbyListResponse:
+        """
+        Same as search_nearby but reads lat/lng from the user's
+        profile.last_location_point automatically.
+        Raises 404 if profile not found, 400 if location not set.
+        """
+        profile = get_profile_by_user_id(db, user_id)
+        if not profile:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Profile not found. Create a profile first.",
+            )
+        if profile.last_location_point is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No location saved on your profile. Update your location first via PATCH /profiles/me/location",
+            )
+        # Convert PostGIS WKBElement → lat/lng
+        shape = to_shape(profile.last_location_point)
+        return self.search_nearby(
+            latitude=shape.y,
+            longitude=shape.x,
+            radius_km=radius_km,
+            category_id=category_id,
+            page=page,
+            page_size=page_size,
+        )

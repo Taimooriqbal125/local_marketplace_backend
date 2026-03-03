@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, status, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import timedelta
+from uuid import UUID
 
 from app.db.session import get_db
 from app.schemas.user import UserCreate, UserUpdate, UserResponse, Token
@@ -108,26 +109,48 @@ current_admin: User = Depends(security.get_current_admin_user)
 #  GET /users/{user_id}  →  Get one user by ID
 # ============================================================
 @router.get("/{user_id}", response_model=UserResponse)
-def get_user(user_id: int, db: Session = Depends(get_db)):
+def get_user(user_id: UUID, db: Session = Depends(get_db)):
     """Retrieve a single user by their ID."""
     return user_service.get_user(db, user_id)
 
 
 # ============================================================
-#  PUT /users/{user_id}  →  Update a user
+#  PATCH /users/{user_id}  →  Update a user (owner or admin)
 # ============================================================
-@router.put("/{user_id}", response_model=UserResponse)
-def update_user(user_id: int, user_data: UserUpdate, db: Session = Depends(get_db)):
+@router.patch("/{user_id}", response_model=UserResponse)
+def update_user(
+    user_id: UUID,
+    user_data: UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(security.get_current_user),
+):
     """
-    Update user information. Send only the fields you want to change.
+    Update user information. Owner can update own profile.
+    Only admins can change is_admin / is_active.
     """
+    # Only the owner or an admin can update
+    if current_user.id != user_id and not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only update your own account",
+        )
+    # Only admins can flip is_admin / is_active
+    if (user_data.is_admin is not None or user_data.is_active is not None) and not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admins can change is_admin or is_active",
+        )
     return user_service.update_user(db, user_id, user_data)
 
 
 # ============================================================
-#  DELETE /users/{user_id}  →  Delete a user
+#  DELETE /users/{user_id}  →  Delete a user (admin only)
 # ============================================================
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_user(user_id: int, db: Session = Depends(get_db)):
-    """Permanently delete a user."""
+def delete_user(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(security.get_current_admin_user),
+):
+    """Permanently delete a user. Admin only."""
     user_service.delete_user(db, user_id)

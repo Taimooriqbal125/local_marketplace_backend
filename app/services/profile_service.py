@@ -13,16 +13,41 @@ The service:
 
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
+from datetime import datetime
 from uuid import UUID
 from decimal import Decimal
 
+
+from geoalchemy2.elements import WKTElement
+
 from app.models.profile import Profile
+from app.models.user import User
 from app.schemas.profile import ProfileCreate, ProfileUpdate
 from app.repositories import profile_repo
 
 
+def _to_wkt(location_point) -> WKTElement | None:
+    """Convert a LocationPoint Pydantic model or dict to a PostGIS WKTElement."""
+    if location_point is None:
+        return None
+    if hasattr(location_point, "latitude"):
+        lat, lon = location_point.latitude, location_point.longitude
+    elif isinstance(location_point, dict):
+        lat, lon = location_point["latitude"], location_point["longitude"]
+    else:
+        return None
+    return WKTElement(f"POINT({lon} {lat})", srid=4326)
+
+
 def create_profile(db: Session, profile_data: ProfileCreate) -> Profile:
-    """Register a new profile. Raises 400 if profile for user already exists."""
+    """Register a new profile. Raises 400 if profile for user already exists or userId is invalid."""
+    # Check if user exists
+    user = db.query(User).filter(User.id == profile_data.userId).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User does not exist"
+        )
     existing = profile_repo.get_profile_by_user_id(db, profile_data.userId)
     if existing:
         raise HTTPException(
@@ -35,7 +60,12 @@ def create_profile(db: Session, profile_data: ProfileCreate) -> Profile:
         bio=profile_data.bio,
         photoUrl=profile_data.photoUrl,
         sellerStatus=profile_data.sellerStatus,
-        lastLocation=profile_data.lastLocation,
+        last_location_point=_to_wkt(profile_data.last_location_point),
+        last_location_at=datetime.now() if profile_data.last_location_point else None,
+        last_location_accuracy_m=profile_data.last_location_accuracy_m,
+        last_location_source=profile_data.last_location_source,
+        default_location_point=_to_wkt(profile_data.default_location_point),
+        location_tracking_enabled=profile_data.location_tracking_enabled,
         isBanned=profile_data.isBanned,
         sellerRatingAvg=profile_data.sellerRatingAvg or Decimal("0.00"),
         sellerRatingCount=profile_data.sellerRatingCount or 0,
@@ -64,6 +94,11 @@ def update_profile(db: Session, user_id: UUID, profile_data: ProfileUpdate) -> P
     """Update a profile's info. Only fields that are sent get updated."""
     db_profile = get_profile(db, user_id)  # reuse the 404 check from above
     update_data = profile_data.model_dump(exclude_unset=True)
+    
+    # Automatically update timestamp if location point is updated
+    if "last_location_point" in update_data:
+        update_data["last_location_at"] = datetime.now()
+        
     return profile_repo.update_profile(db, db_profile, update_data)
 
 

@@ -5,6 +5,7 @@ from sqlalchemy import String, Text, Boolean, Numeric, Float, ForeignKey, DateTi
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
+from geoalchemy2 import Geography
 
 from app.db.base_class import Base
 
@@ -98,14 +99,20 @@ class ServiceListing(Base):
     # ── Location ─────────────────────────────────────────────────────────────
 
     # serviceLocation: human-readable address or area description
-    serviceLocation: Mapped[Optional[str]] = mapped_column(
+    serviceLocation: Mapped[str] = mapped_column(
         String(255),
-        nullable=True,
+        nullable=False,
     )
 
     # serviceRadiusKm: how far (in km) the seller is willing to travel / serve
-    serviceRadiusKm: Mapped[Optional[float]] = mapped_column(
+    serviceRadiusKm: Mapped[float] = mapped_column(
         Float,
+        nullable=False,
+    )
+
+    # service_location: PostGIS Geography point (lon, lat, WGS84)
+    service_location: Mapped[Optional[object]] = mapped_column(
+        Geography(geometry_type="POINT", srid=4326),
         nullable=True,
     )
 

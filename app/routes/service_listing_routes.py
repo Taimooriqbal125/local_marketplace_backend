@@ -14,6 +14,7 @@ from app.models.user import User
 from app.schemas.services_listing import (
     ServiceListingCreate,
     ServiceListingListResponse,
+    ServiceListingNearbyListResponse,
     ServiceListingResponse,
     ServiceListingUpdate,
 )
@@ -23,6 +24,56 @@ router = APIRouter(
     prefix="/services",
     tags=["Services"],
 )
+
+
+@router.get("/nearby/me", response_model=ServiceListingNearbyListResponse)
+def get_nearby_listings_from_profile(
+    radius_km: float = Query(10.0, ge=0.1, le=100.0, description="Search radius in km"),
+    category_id: Optional[int] = Query(None, description="Filter by category"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Find nearby services using your saved profile location.
+    No need to send lat/lng — reads from your last_location_point automatically.
+    Update your location first via PATCH /profiles/me/location.
+    """
+    service = ServiceListingService(db)
+    return service.search_nearby_from_profile(
+        user_id=current_user.id,
+        db=db,
+        radius_km=radius_km,
+        category_id=category_id,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get("/nearby", response_model=ServiceListingNearbyListResponse)
+def get_nearby_listings(
+    latitude: float = Query(..., ge=-90, le=90, description="Your current latitude"),
+    longitude: float = Query(..., ge=-180, le=180, description="Your current longitude"),
+    radius_km: float = Query(10.0, ge=0.1, le=100.0, description="Search radius in km"),
+    category_id: Optional[int] = Query(None, description="Filter by category"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """
+    Find active service listings near a given location.
+    Returns listings whose coverage radius overlaps your position, sorted closest-first.
+    """
+    service = ServiceListingService(db)
+    return service.search_nearby(
+        latitude=latitude,
+        longitude=longitude,
+        radius_km=radius_km,
+        category_id=category_id,
+        page=page,
+        page_size=page_size,
+    )
 
 
 @router.get("/", response_model=ServiceListingListResponse)

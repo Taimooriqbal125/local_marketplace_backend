@@ -43,7 +43,12 @@ class CityUpdate(BaseModel):
             raise ValueError("slug must be lowercase and URL-friendly (e.g. 'karachi', no spaces/underscores)")
         return v
 
-class CityOut(CityBase):
+class CityOut(BaseModel):
     id: uuid.UUID
+    name: str
+    country: str
+    slug: str
+    isActive: bool
+    centerPoint: str | None = None
 
     model_config = dict(from_attributes=True)

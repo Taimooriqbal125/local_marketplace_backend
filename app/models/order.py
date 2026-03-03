@@ -21,8 +21,8 @@ class Order(Base):
     
     __table_args__ = (
         # Business rules validation at database level
-        CheckConstraint("proposedPrice > 0", name="ck_orders_proposed_price_positive"),
-        CheckConstraint("agreedPrice IS NULL OR agreedPrice > 0", name="ck_orders_agreed_price_positive"),
+        CheckConstraint('"proposedPrice" > 0', name="ck_orders_proposed_price_positive"),
+        CheckConstraint('"agreedPrice" IS NULL OR "agreedPrice" > 0', name="ck_orders_agreed_price_positive"),
     )
 
     # ── Primary Key ──────────────────────────────────────────────────────────
