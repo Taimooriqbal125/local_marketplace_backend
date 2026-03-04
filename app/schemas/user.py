@@ -19,10 +19,10 @@ from uuid import UUID
 
 class UserCreate(BaseModel):
     """Fields required to create a new user."""
-    name: str
     email: EmailStr
     password: str
     is_admin: Optional[bool] = Field(default=False, alias="isAdmin")
+    phone_number: Optional[str] = None
 
     class Config:
         populate_by_name = True  # allows both is_admin and isAdmin
@@ -30,11 +30,11 @@ class UserCreate(BaseModel):
 
 class UserUpdate(BaseModel):
     """Fields the client can update. All optional — send only what changes."""
-    name: Optional[str] = None
     email: Optional[EmailStr] = None
     password: Optional[str] = None
     is_admin: Optional[bool] = None
     is_active: Optional[bool] = None
+    phone_number: Optional[str] = None
 
 
 # ---------- Response Schemas (what the API sends back) ----------
@@ -45,15 +45,16 @@ class UserResponse(BaseModel):
     Notice: NO password field here — we never expose that.
     """
     id: UUID
-    name: str
     email: str
     is_active: bool
     is_admin: bool
+    phone_number: Optional[str] = Field(default=None, validation_alias="phone")
     created_at: datetime
     updated_at: datetime
 
     class Config:
         from_attributes = True  # allows creating this from a SQLAlchemy model instance
+        populate_by_name = True
 
 
 # ---------- Token Schema (for Login) ----------

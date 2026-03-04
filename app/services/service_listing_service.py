@@ -12,6 +12,7 @@ Responsibilities:
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 from typing import Optional
 
 from fastapi import HTTPException, status
@@ -92,6 +93,11 @@ class ServiceListingService:
         category_id: Optional[int] = None,
         city_id: Optional[uuid.UUID] = None,
         seller_id: Optional[uuid.UUID] = None,
+        is_negotiable: Optional[bool] = None,
+        price_type: Optional[str] = None,
+        min_price: Optional[Decimal] = None,
+        max_price: Optional[Decimal] = None,
+        search: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> ServiceListingListResponse:
@@ -105,6 +111,11 @@ class ServiceListingService:
             category_id=category_id,
             city_id=city_id,
             seller_id=seller_id,
+            is_negotiable=is_negotiable,
+            price_type=price_type,
+            min_price=min_price,
+            max_price=max_price,
+            search=search,
             skip=skip,
             limit=page_size,
         )
@@ -118,17 +129,30 @@ class ServiceListingService:
     def list_my_listings(
         self,
         seller_id: uuid.UUID,
+        status: Optional[str] = None,
+        category_id: Optional[int] = None,
+        is_negotiable: Optional[bool] = None,
+        price_type: Optional[str] = None,
+        min_price: Optional[Decimal] = None,
+        max_price: Optional[Decimal] = None,
+        search: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> ServiceListingListResponse:
         """
-        Return all listings for the authenticated seller (all statuses).
-        Uses get_filtered with no status filter so drafts/paused are included.
+        Return all listings for the authenticated seller.
+        Pass status=None to see all (drafts, paused, active, etc.).
         """
         skip = (page - 1) * page_size
         results, total = self.repo.get_filtered(
             seller_id=seller_id,
-            status=None,            # seller can see their own non-active listings
+            status=status,            # seller can filter by their own status
+            category_id=category_id,
+            is_negotiable=is_negotiable,
+            price_type=price_type,
+            min_price=min_price,
+            max_price=max_price,
+            search=search,
             skip=skip,
             limit=page_size,
         )
@@ -200,18 +224,22 @@ class ServiceListingService:
     def delete_listing(
         self,
         listing_id: uuid.UUID,
-        current_seller_id: uuid.UUID,
+        current_user_id: uuid.UUID,
+        is_admin: bool = False,
     ) -> None:
         """
         Hard-delete a listing.
         - 404 if listing doesn't exist
-        - 403 if the requester is not the owner
+        - 403 if the requester is not the owner (unless admin)
         """
         listing = self.repo.get(listing_id)
         if not listing:
             raise ListingNotFoundError(listing_id)
-        if listing.sellerId != current_seller_id:
+        
+        # ✅ Allow deletion if user is the owner OR if they are an admin
+        if listing.sellerId != current_user_id and not is_admin:
             raise ListingForbiddenError()
+            
         self.repo.delete(listing)
 
     # ── Status Transitions ───────────────────────────────────────────────────
@@ -299,6 +327,11 @@ class ServiceListingService:
         longitude: float,
         radius_km: float = 10.0,
         category_id: Optional[int] = None,
+        is_negotiable: Optional[bool] = None,
+        price_type: Optional[str] = None,
+        min_price: Optional[Decimal] = None,
+        max_price: Optional[Decimal] = None,
+        search: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> ServiceListingNearbyListResponse:
@@ -312,6 +345,11 @@ class ServiceListingService:
             longitude=longitude,
             radius_km=radius_km,
             category_id=category_id,
+            is_negotiable=is_negotiable,
+            price_type=price_type,
+            min_price=min_price,
+            max_price=max_price,
+            search=search,
             skip=skip,
             limit=page_size,
         )
@@ -337,6 +375,11 @@ class ServiceListingService:
         db: Session,
         radius_km: float = 10.0,
         category_id: Optional[int] = None,
+        is_negotiable: Optional[bool] = None,
+        price_type: Optional[str] = None,
+        min_price: Optional[Decimal] = None,
+        max_price: Optional[Decimal] = None,
+        search: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> ServiceListingNearbyListResponse:
@@ -363,6 +406,11 @@ class ServiceListingService:
             longitude=shape.x,
             radius_km=radius_km,
             category_id=category_id,
+            is_negotiable=is_negotiable,
+            price_type=price_type,
+            min_price=min_price,
+            max_price=max_price,
+            search=search,
             page=page,
             page_size=page_size,
         )

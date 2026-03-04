@@ -24,9 +24,25 @@ def get_user_by_email(db: Session, email: str) -> Optional[User]:
     return db.query(User).filter(User.email == email).first()
 
 
-def get_all_users(db: Session, skip: int = 0, limit: int = 100) -> list[User]:
-    """Return a paginated list of users."""
-    return db.query(User).offset(skip).limit(limit).all()
+def get_user_by_phone(db: Session, phone: str) -> Optional[User]:
+    """Fetch a single user by phone number (useful for duplicate checks)."""
+    return db.query(User).filter(User.phone == phone).first()
+
+
+def get_all_users(
+    db: Session,
+    skip: int = 0,
+    limit: int = 100,
+    is_active: Optional[bool] = None,
+    is_admin: Optional[bool] = None,
+) -> list[User]:
+    """Return a paginated and optionally filtered list of users."""
+    query = db.query(User)
+    if is_active is not None:
+        query = query.filter(User.is_active == is_active)
+    if is_admin is not None:
+        query = query.filter(User.is_admin == is_admin)
+    return query.offset(skip).limit(limit).all()
 
 
 def create_user(db: Session, user: User) -> User:

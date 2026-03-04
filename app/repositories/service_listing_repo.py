@@ -5,6 +5,7 @@ ServiceListing Repository — the *only* layer that talks to the DB for listings
 from __future__ import annotations
 
 import uuid
+from decimal import Decimal
 from typing import Optional
 
 import sqlalchemy as sa
@@ -109,6 +110,11 @@ class ServiceListingRepository:
         category_id: Optional[int] = None,
         city_id: Optional[uuid.UUID] = None,
         seller_id: Optional[uuid.UUID] = None,
+        is_negotiable: Optional[bool] = None,
+        price_type: Optional[str] = None,
+        min_price: Optional[Decimal] = None,
+        max_price: Optional[Decimal] = None,
+        search: Optional[str] = None,
         skip: int = 0,
         limit: int = 20,
     ) -> tuple[list[ServiceListing], int]:
@@ -122,6 +128,28 @@ class ServiceListingRepository:
             query = query.filter(ServiceListing.cityId == city_id)
         if seller_id is not None:
             query = query.filter(ServiceListing.sellerId == seller_id)
+        if is_negotiable is not None:
+            query = query.filter(ServiceListing.isNegotiable == is_negotiable)
+        if price_type is not None:
+            query = query.filter(ServiceListing.priceType == price_type)
+        if min_price is not None:
+            query = query.filter(
+                ServiceListing.priceAmount.isnot(None),
+                ServiceListing.priceAmount >= min_price,
+            )
+        if max_price is not None:
+            query = query.filter(
+                ServiceListing.priceAmount.isnot(None),
+                ServiceListing.priceAmount <= max_price,
+            )
+        if search is not None:
+            term = f"%{search.strip()}%"
+            query = query.filter(
+                sa.or_(
+                    ServiceListing.title.ilike(term),
+                    ServiceListing.description.ilike(term),
+                )
+            )
 
         total = query.count()
         results = (
@@ -141,6 +169,11 @@ class ServiceListingRepository:
         longitude: float,
         radius_km: float,
         category_id: Optional[int] = None,
+        is_negotiable: Optional[bool] = None,
+        price_type: Optional[str] = None,
+        min_price: Optional[Decimal] = None,
+        max_price: Optional[Decimal] = None,
+        search: Optional[str] = None,
         skip: int = 0,
         limit: int = 20,
     ) -> tuple[list[tuple[ServiceListing, float]], int]:
@@ -174,18 +207,39 @@ class ServiceListingRepository:
                 ServiceListing.status == "active",
                 # Only listings that HAVE a location point set
                 ServiceListing.service_location.isnot(None),
-                # ✅ Core proximity check:
-                # Customer must be within the SERVICE's defined coverage radius
+                # ✅ Check if the service is within the USER'S requested search radius
                 ST_DWithin(
                     ServiceListing.service_location,
                     customer_point,
-                    ServiceListing.serviceRadiusKm * 1000,  # km → meters
+                    radius_km * 1000,  # km → meters (using argument radius_km)
                 ),
             )
         )
 
         if category_id is not None:
             query = query.filter(ServiceListing.categoryId == category_id)
+        if is_negotiable is not None:
+            query = query.filter(ServiceListing.isNegotiable == is_negotiable)
+        if price_type is not None:
+            query = query.filter(ServiceListing.priceType == price_type)
+        if min_price is not None:
+            query = query.filter(
+                ServiceListing.priceAmount.isnot(None),
+                ServiceListing.priceAmount >= min_price,
+            )
+        if max_price is not None:
+            query = query.filter(
+                ServiceListing.priceAmount.isnot(None),
+                ServiceListing.priceAmount <= max_price,
+            )
+        if search is not None:
+            term = f"%{search.strip()}%"
+            query = query.filter(
+                sa.or_(
+                    ServiceListing.title.ilike(term),
+                    ServiceListing.description.ilike(term),
+                )
+            )
 
         total = query.count()
         results = (

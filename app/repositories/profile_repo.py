@@ -20,9 +20,20 @@ def get_profile_by_user_id(db: Session, user_id: UUID) -> Optional[Profile]:
     return db.query(Profile).filter(Profile.userId == user_id).first()
 
 
-def get_all_profiles(db: Session, skip: int = 0, limit: int = 100) -> list[Profile]:
-    """Return a paginated list of profiles."""
-    return db.query(Profile).offset(skip).limit(limit).all()
+def get_all_profiles(
+    db: Session,
+    skip: int = 0,
+    limit: int = 100,
+    is_banned: Optional[bool] = None,
+    seller_status: Optional[str] = None,
+) -> list[Profile]:
+    """Get a paginated and filtered list of all profiles."""
+    query = db.query(Profile)
+    if is_banned is not None:
+        query = query.filter(Profile.isBanned == is_banned)
+    if seller_status is not None:
+        query = query.filter(Profile.sellerStatus == seller_status)
+    return query.offset(skip).limit(limit).all()
 
 
 def create_profile(db: Session, profile: Profile) -> Profile:

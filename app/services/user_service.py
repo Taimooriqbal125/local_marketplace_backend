@@ -20,6 +20,7 @@ from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate
 from app.repositories import user_repo
 from app.core.security import hash_password
+from typing import Optional
 
 
 def create_user(db: Session, user_data: UserCreate) -> User:
@@ -35,12 +36,21 @@ def create_user(db: Session, user_data: UserCreate) -> User:
             detail="A user with this email already exists"
         )
 
-    # 2. Hash the password before saving
+    # 2. Business rule: no duplicate phone numbers
+    if user_data.phone_number:
+        existing_phone = user_repo.get_user_by_phone(db, user_data.phone_number)
+        if existing_phone:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A user with this phone number already exists"
+            )
+
+    # 3. Hash the password before saving
     new_user = User(
-        name=user_data.name,
         email=user_data.email,
         hashed_password=hash_password(user_data.password),
         is_admin=user_data.is_admin,
+        phone=user_data.phone_number,
     )
 
     # 3. Delegate the actual DB insert to the repository
@@ -75,9 +85,17 @@ def get_user(db: Session, user_id: uuid.UUID) -> User:
     return user
 
 
-def get_all_users(db: Session, skip: int = 0, limit: int = 100) -> list[User]:
-    """Get a paginated list of all users."""
-    return user_repo.get_all_users(db, skip=skip, limit=limit)
+def get_all_users(
+    db: Session,
+    skip: int = 0,
+    limit: int = 100,
+    is_active: Optional[bool] = None,
+    is_admin: Optional[bool] = None,
+) -> list[User]:
+    """Get a paginated and filtered list of all users."""
+    return user_repo.get_all_users(
+        db, skip=skip, limit=limit, is_active=is_active, is_admin=is_admin
+    )
 
 
 def update_user(db: Session, user_id: uuid.UUID, user_data: UserUpdate) -> User:
@@ -89,6 +107,18 @@ def update_user(db: Session, user_id: uuid.UUID, user_data: UserUpdate) -> User:
 
     # Build a dict of only the fields the client actually sent
     update_data = user_data.model_dump(exclude_unset=True)
+
+    # If they're updating the phone number, map it to the model's 'phone' field
+    if "phone_number" in update_data:
+        new_phone = update_data["phone_number"]
+        # Business rule: check for duplicates but skip the current user
+        existing_phone = user_repo.get_user_by_phone(db, new_phone)
+        if existing_phone and existing_phone.id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A user with this phone number already exists"
+            )
+        update_data["phone"] = update_data.pop("phone_number")
 
     # If they're updating the password, hash the new one
     if "password" in update_data:

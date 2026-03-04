@@ -13,6 +13,7 @@ from app.db.session import get_db
 from app.models.user import User
 from app.schemas.services_listing import (
     ServiceListingCreate,
+    ServiceListingFilterParams,
     ServiceListingListResponse,
     ServiceListingNearbyListResponse,
     ServiceListingResponse,
@@ -29,9 +30,7 @@ router = APIRouter(
 @router.get("/nearby/me", response_model=ServiceListingNearbyListResponse)
 def get_nearby_listings_from_profile(
     radius_km: float = Query(10.0, ge=0.1, le=100.0, description="Search radius in km"),
-    category_id: Optional[int] = Query(None, description="Filter by category"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    filters: ServiceListingFilterParams = Depends(),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -45,9 +44,14 @@ def get_nearby_listings_from_profile(
         user_id=current_user.id,
         db=db,
         radius_km=radius_km,
-        category_id=category_id,
-        page=page,
-        page_size=page_size,
+        category_id=filters.category_id,
+        is_negotiable=filters.is_negotiable,
+        price_type=filters.price_type,
+        min_price=filters.min_price,
+        max_price=filters.max_price,
+        search=filters.search,
+        page=filters.page,
+        page_size=filters.page_size,
     )
 
 
@@ -56,9 +60,7 @@ def get_nearby_listings(
     latitude: float = Query(..., ge=-90, le=90, description="Your current latitude"),
     longitude: float = Query(..., ge=-180, le=180, description="Your current longitude"),
     radius_km: float = Query(10.0, ge=0.1, le=100.0, description="Search radius in km"),
-    category_id: Optional[int] = Query(None, description="Filter by category"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    filters: ServiceListingFilterParams = Depends(),
     db: Session = Depends(get_db),
 ):
     """
@@ -70,53 +72,94 @@ def get_nearby_listings(
         latitude=latitude,
         longitude=longitude,
         radius_km=radius_km,
-        category_id=category_id,
-        page=page,
-        page_size=page_size,
+        category_id=filters.category_id,
+        is_negotiable=filters.is_negotiable,
+        price_type=filters.price_type,
+        min_price=filters.min_price,
+        max_price=filters.max_price,
+        search=filters.search,
+        page=filters.page,
+        page_size=filters.page_size,
     )
 
 
 @router.get("/", response_model=ServiceListingListResponse)
 def list_listings(
-    status: Optional[str] = Query("active", description="Filter by status (default: active)"),
-    category_id: Optional[int] = Query(None, description="Filter by category ID"),
-    city_id: Optional[uuid.UUID] = Query(None, description="Filter by city ID"),
-    seller_id: Optional[uuid.UUID] = Query(None, description="Filter by seller ID"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    listing_status: Optional[str] = Query(
+        "active",
+        alias="status",
+        description="Filter by status (default: active)",
+    ),
+    city_id: Optional[uuid.UUID] = Query(
+        None, alias="cityId", description="Filter by city ID"
+    ),
+    seller_id: Optional[uuid.UUID] = Query(
+        None, alias="sellerId", description="Filter by seller ID"
+    ),
+    filters: ServiceListingFilterParams = Depends(),
     db: Session = Depends(get_db),
 ):
     """
     Browse service listings with optional filters.
     By default, only 'active' listings are returned.
+
+    **Filter examples**
+    - `?isNegotiable=true` — only negotiable listings
+    - `?priceType=fixed` — only fixed-price listings
+    - `?minPrice=10&maxPrice=100` — price range
+    - `?search=plumbing` — keyword in title or description
+    - `?categoryId=3` — specific category
+    - `?status=paused` — listings by status
     """
     service = ServiceListingService(db)
     return service.list_listings(
-        status=status,
-        category_id=category_id,
+        status=listing_status,
+        category_id=filters.category_id,
         city_id=city_id,
         seller_id=seller_id,
-        page=page,
-        page_size=page_size,
+        is_negotiable=filters.is_negotiable,
+        price_type=filters.price_type,
+        min_price=filters.min_price,
+        max_price=filters.max_price,
+        search=filters.search,
+        page=filters.page,
+        page_size=filters.page_size,
     )
 
 
 @router.get("/me", response_model=ServiceListingListResponse)
 def list_my_listings(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    listing_status: Optional[str] = Query(
+        None,
+        alias="status",
+        description="Filter by status. Omit to see all (drafts, active, paused, etc.)",
+    ),
+    filters: ServiceListingFilterParams = Depends(),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    Retrieve all listings belonging to the authenticated user.
-    Includes drafts, active, paused, etc.
+    Retrieve listings belonging to the authenticated user.
+    Includes all statuses by default (drafts, active, paused, closed).
+
+    **Filter examples**
+    - `?status=active` — only your active listings
+    - `?status=draft` — only your drafts
+    - `?isNegotiable=true` — your negotiable listings
+    - `?search=logo` — keyword search in your listings
     """
     service = ServiceListingService(db)
     return service.list_my_listings(
         seller_id=current_user.id,
-        page=page,
-        page_size=page_size,
+        status=listing_status,
+        category_id=filters.category_id,
+        is_negotiable=filters.is_negotiable,
+        price_type=filters.price_type,
+        min_price=filters.min_price,
+        max_price=filters.max_price,
+        search=filters.search,
+        page=filters.page,
+        page_size=filters.page_size,
     )
 
 
@@ -165,7 +208,7 @@ def update_listing(
     )
 
 
-@router.delete("/{listing_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{listing_id}", status_code=status.HTTP_200_OK)
 def delete_listing(
     listing_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
@@ -173,11 +216,15 @@ def delete_listing(
 ):
     """
     Delete a service listing permanently.
-    Only the owner of the listing can delete it.
+    Admin can delete any listing; Sellers can delete only their own.
     """
     service = ServiceListingService(db)
-    service.delete_listing(listing_id=listing_id, current_seller_id=current_user.id)
-    return None
+    service.delete_listing(
+        listing_id=listing_id, 
+        current_user_id=current_user.id,
+        is_admin=current_user.is_admin
+    )
+    return {"message": "Service listing deleted successfully."}
 
 
 @router.post("/{listing_id}/publish", response_model=ServiceListingResponse)

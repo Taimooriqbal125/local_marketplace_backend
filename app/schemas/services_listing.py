@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 from uuid import UUID
 
+from fastapi import Query
 from geoalchemy2.shape import to_shape
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -204,7 +205,86 @@ class ServiceListingResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Nearby search query params schema
+# Reusable filter dependency — inject via Depends(ServiceListingFilterParams)
+# ---------------------------------------------------------------------------
+class ServiceListingFilterParams:
+    """
+    FastAPI dependency that bundles all common service-listing query filters.
+
+    Supports camelCase aliases for JSON-API consistency while keeping
+    Python attribute names in snake_case.
+
+    Usage::
+
+        @router.get("/")
+        def list_listings(
+            filters: Annotated[ServiceListingFilterParams, Depends()],
+            db: Session = Depends(get_db),
+        ):
+            ...
+    """
+
+    def __init__(
+        self,
+        is_negotiable: Annotated[
+            Optional[bool],
+            Query(alias="isNegotiable", description="Filter by negotiability"),
+        ] = None,
+        price_type: Annotated[
+            Optional[PriceType],
+            Query(
+                alias="priceType",
+                description="Price model: fixed | hourly | daily | negotiable",
+            ),
+        ] = None,
+        min_price: Annotated[
+            Optional[Decimal],
+            Query(
+                alias="minPrice",
+                ge=0,
+                description="Minimum price amount (inclusive). Skipped for negotiable listings.",
+            ),
+        ] = None,
+        max_price: Annotated[
+            Optional[Decimal],
+            Query(
+                alias="maxPrice",
+                ge=0,
+                description="Maximum price amount (inclusive). Skipped for negotiable listings.",
+            ),
+        ] = None,
+        search: Annotated[
+            Optional[str],
+            Query(
+                max_length=100,
+                description="Case-insensitive keyword search in title or description",
+            ),
+        ] = None,
+        category_id: Annotated[
+            Optional[int],
+            Query(alias="categoryId", gt=0, description="Filter by category ID"),
+        ] = None,
+        page: Annotated[
+            int,
+            Query(ge=1, description="Page number (1-based)"),
+        ] = 1,
+        page_size: Annotated[
+            int,
+            Query(alias="pageSize", ge=1, le=100, description="Results per page"),
+        ] = 20,
+    ) -> None:
+        self.is_negotiable = is_negotiable
+        self.price_type = price_type
+        self.min_price = min_price
+        self.max_price = max_price
+        self.search = search
+        self.category_id = category_id
+        self.page = page
+        self.page_size = page_size
+
+
+# ---------------------------------------------------------------------------
+# Nearby search query params schema (kept for internal use / documentation)
 # ---------------------------------------------------------------------------
 class NearbySearchParams(BaseModel):
     """Query parameters for the nearby services endpoint."""

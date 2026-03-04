@@ -16,7 +16,7 @@ from fastapi import HTTPException, status
 from datetime import datetime
 from uuid import UUID
 from decimal import Decimal
-
+from typing import Optional
 
 from geoalchemy2.elements import WKTElement
 
@@ -85,9 +85,17 @@ def get_profile(db: Session, user_id: UUID) -> Profile:
     return profile
 
 
-def get_all_profiles(db: Session, skip: int = 0, limit: int = 100) -> list[Profile]:
-    """Get a paginated list of all profiles."""
-    return profile_repo.get_all_profiles(db, skip=skip, limit=limit)
+def get_all_profiles(
+    db: Session,
+    skip: int = 0,
+    limit: int = 100,
+    is_banned: Optional[bool] = None,
+    seller_status: Optional[str] = None,
+) -> list[Profile]:
+    """Get a paginated and filtered list of all profiles."""
+    return profile_repo.get_all_profiles(
+        db, skip=skip, limit=limit, is_banned=is_banned, seller_status=seller_status
+    )
 
 
 def update_profile(db: Session, user_id: UUID, profile_data: ProfileUpdate) -> Profile:

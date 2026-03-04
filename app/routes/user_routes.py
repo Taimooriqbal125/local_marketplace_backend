@@ -9,11 +9,12 @@ This is the *thinnest* layer. A route should:
 All business logic is in the service, all DB work is in the repository.
 """
 
-from fastapi import APIRouter, Depends, status, HTTPException
+from fastapi import APIRouter, Depends, status, HTTPException, Query
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from datetime import timedelta
 from uuid import UUID
+from typing import Optional
 
 from app.db.session import get_db
 from app.schemas.user import UserCreate, UserUpdate, UserResponse, Token
@@ -82,7 +83,6 @@ def create_user(user_data: UserCreate, db: Session = Depends(get_db)):
     """
     Register a new user.
 
-    - **name**: user's full name
     - **email**: must be unique
     - **password**: will be hashed before saving
     """
@@ -93,16 +93,25 @@ def create_user(user_data: UserCreate, db: Session = Depends(get_db)):
 #  GET /users  →  List all users (with optional pagination)
 # ============================================================
 @router.get("/", response_model=list[UserResponse])
-def get_all_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db),
-current_admin: User = Depends(security.get_current_admin_user)
+def get_all_users(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    is_admin: Optional[bool] = Query(None, description="Filter by admin status"),
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(security.get_current_admin_user),
 ):
     """
     Retrieve a list of users.
 
     - **skip**: number of records to skip (for pagination)
     - **limit**: max number of records to return
+    - **is_active**: filter by active status (true/false)
+    - **is_admin**: filter by admin status (true/false)
     """
-    return user_service.get_all_users(db, skip=skip, limit=limit)
+    return user_service.get_all_users(
+        db, skip=skip, limit=limit, is_active=is_active, is_admin=is_admin
+    )
 
 
 # ============================================================
@@ -143,10 +152,9 @@ def update_user(
     return user_service.update_user(db, user_id, user_data)
 
 
-# ============================================================
 #  DELETE /users/{user_id}  →  Delete a user (admin only)
 # ============================================================
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{user_id}", status_code=status.HTTP_200_OK)
 def delete_user(
     user_id: UUID,
     db: Session = Depends(get_db),
@@ -154,3 +162,4 @@ def delete_user(
 ):
     """Permanently delete a user. Admin only."""
     user_service.delete_user(db, user_id)
+    return {"message": "User deleted successfully."}

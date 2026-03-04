@@ -9,9 +9,10 @@ This is the *thinnest* layer. A route should:
 All business logic is in the service, all DB work is in the repository.
 """
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, status, Query, HTTPException
 from sqlalchemy.orm import Session
 from uuid import UUID
+from typing import Optional
 
 from app.db.session import get_db
 from app.schemas.profile import ProfileCreate, ProfileUpdate, ProfileResponse, LocationPoint
@@ -61,9 +62,33 @@ def update_my_location(
 
 
 @router.get("/", response_model=list[ProfileResponse])
-def get_all_profiles(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    """Retrieve a list of profiles (Public)."""
-    return profile_service.get_all_profiles(db, skip=skip, limit=limit)
+def get_all_profiles(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    is_banned: Optional[bool] = Query(None, alias="isBanned"),
+    seller_status: Optional[str] = Query(None, alias="sellerStatus"),
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user),
+):
+    """
+    Retrieve a list of profiles (Public).
+
+    - **skip**: number of records to skip
+    - **limit**: max number of records to return
+    - **isBanned**: filter by banned status (true/false)
+    - **sellerStatus**: [ADMIN ONLY] filter by seller status (active/suspended)
+    """
+    # Authorization check for sellerStatus
+    if seller_status is not None:
+        if not current_user or not current_user.is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only admins can filter by sellerStatus"
+            )
+
+    return profile_service.get_all_profiles(
+        db, skip=skip, limit=limit, is_banned=is_banned, seller_status=seller_status
+    )
 
 
 @router.get("/{user_id}", response_model=ProfileResponse)
@@ -81,10 +106,9 @@ def update_profile(
 ):
     """
     Update profile information. 
-    Users can only update their own profile.
+    Only the owner or an admin can update.
     """
-    if user_id != current_user.id:
-        from fastapi import HTTPException
+    if user_id != current_user.id and not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Cannot update another user's profile"
@@ -103,7 +127,6 @@ def delete_profile(
     Only the owner or an admin can delete.
     """
     if user_id != current_user.id and not current_user.is_admin:
-        from fastapi import HTTPException
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Cannot delete another user's profile"
