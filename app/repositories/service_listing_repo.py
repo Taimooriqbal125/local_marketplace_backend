@@ -115,10 +115,27 @@ class ServiceListingRepository:
         min_price: Optional[Decimal] = None,
         max_price: Optional[Decimal] = None,
         search: Optional[str] = None,
+        top_selling: bool = False,
+        top_rating: bool = False,
+        city_slug: Optional[str] = None,
+        category_slug: Optional[str] = None,
         skip: int = 0,
         limit: int = 20,
     ) -> tuple[list[ServiceListing], int]:
+        from app.models.profile import Profile
+        from app.models.cities import City
+        from app.models.category import Category
+
         query = self.db.query(ServiceListing)
+
+        if top_selling or top_rating:
+            query = query.join(Profile, ServiceListing.sellerId == Profile.userId)
+        
+        if city_slug:
+            query = query.join(City, ServiceListing.cityId == City.id).filter(City.slug == city_slug)
+            
+        if category_slug:
+            query = query.join(Category, ServiceListing.categoryId == Category.id).filter(Category.slug == category_slug)
 
         if status is not None:
             query = query.filter(ServiceListing.status == status)
@@ -152,12 +169,16 @@ class ServiceListingRepository:
             )
 
         total = query.count()
-        results = (
-            query.order_by(ServiceListing.createdAt.desc())
-            .offset(skip)
-            .limit(limit)
-            .all()
-        )
+
+        # Sorting logic
+        if top_selling:
+            query = query.order_by(Profile.sellerCompletedOrdersCount.desc())
+        elif top_rating:
+            query = query.order_by(Profile.sellerRatingAvg.desc(), Profile.sellerRatingCount.desc())
+        else:
+            query = query.order_by(ServiceListing.createdAt.desc())
+
+        results = query.offset(skip).limit(limit).all()
         return results, total
 
     # ── ✅ Proximity Search ───────────────────────────────────────────────────

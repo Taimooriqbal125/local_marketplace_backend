@@ -26,6 +26,7 @@ from app.schemas.services_listing import (
     ServiceListingNearbyListResponse,
     ServiceListingNearbyResponse,
     ServiceListingResponse,
+    ServiceListingDetailResponse,
     ServiceListingUpdate,
 )
 
@@ -79,12 +80,12 @@ class ServiceListingService:
 
     # ── Read Operations ──────────────────────────────────────────────────────
 
-    def get_listing(self, listing_id: uuid.UUID) -> ServiceListingResponse:
+    def get_listing(self, listing_id: uuid.UUID) -> ServiceListingDetailResponse:
         """Fetch a single listing by ID. Raises 404 if not found."""
         listing = self.repo.get(listing_id)
         if not listing:
             raise ListingNotFoundError(listing_id)
-        return ServiceListingResponse.model_validate(listing)
+        return ServiceListingDetailResponse.model_validate(listing)
 
     def list_listings(
         self,
@@ -98,6 +99,10 @@ class ServiceListingService:
         min_price: Optional[Decimal] = None,
         max_price: Optional[Decimal] = None,
         search: Optional[str] = None,
+        top_selling: bool = False,
+        top_rating: bool = False,
+        city_slug: Optional[str] = None,
+        category_slug: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> ServiceListingListResponse:
@@ -116,6 +121,10 @@ class ServiceListingService:
             min_price=min_price,
             max_price=max_price,
             search=search,
+            top_selling=top_selling,
+            top_rating=top_rating,
+            city_slug=city_slug,
+            category_slug=category_slug,
             skip=skip,
             limit=page_size,
         )
@@ -136,6 +145,10 @@ class ServiceListingService:
         min_price: Optional[Decimal] = None,
         max_price: Optional[Decimal] = None,
         search: Optional[str] = None,
+        top_selling: bool = False,
+        top_rating: bool = False,
+        city_slug: Optional[str] = None,
+        category_slug: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
     ) -> ServiceListingListResponse:
@@ -153,6 +166,10 @@ class ServiceListingService:
             min_price=min_price,
             max_price=max_price,
             search=search,
+            top_selling=top_selling,
+            top_rating=top_rating,
+            city_slug=city_slug,
+            category_slug=category_slug,
             skip=skip,
             limit=page_size,
         )
@@ -189,16 +206,28 @@ class ServiceListingService:
         listing_id: uuid.UUID,
         obj_in: ServiceListingUpdate,
         current_seller_id: uuid.UUID,
+        is_admin: bool = False,
     ) -> ServiceListingResponse:
         """
         Partially update a listing.
         - 404 if listing doesn't exist
-        - 403 if the requester is not the owner
+        - 403 if the requester is not the owner (unless admin)
+        - 403 if trying to set status to 'banned' or modify a 'banned' listing without admin
         """
         listing = self.repo.get(listing_id)
         if not listing:
             raise ListingNotFoundError(listing_id)
-        if listing.sellerId != current_seller_id:
+
+        # ✅ Basic permission: Owner or Admin
+        if listing.sellerId != current_seller_id and not is_admin:
+            raise ListingForbiddenError()
+
+        # ✅ Security Rule: Only admin can set 'banned' status
+        if obj_in.status == "banned" and not is_admin:
+            raise ListingForbiddenError()
+
+        # ✅ Security Rule: If already banned, only admin can edit/unban
+        if listing.status == "banned" and not is_admin:
             raise ListingForbiddenError()
 
         # Check for uniqueness if title or description is being updated
@@ -241,54 +270,6 @@ class ServiceListingService:
             raise ListingForbiddenError()
             
         self.repo.delete(listing)
-
-    # ── Status Transitions ───────────────────────────────────────────────────
-
-    def publish_listing(
-        self,
-        listing_id: uuid.UUID,
-        current_seller_id: uuid.UUID,
-    ) -> ServiceListingResponse:
-        """
-        Transition a listing from 'draft' → 'active'.
-        Only the owner can publish their own listing.
-        """
-        listing = self.repo.get(listing_id)
-        if not listing:
-            raise ListingNotFoundError(listing_id)
-        if listing.sellerId != current_seller_id:
-            raise ListingForbiddenError()
-        if listing.status == "active":
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Listing is already active.",
-            )
-        update = ServiceListingUpdate(status="active")
-        updated = self.repo.update(listing, update)
-        return ServiceListingResponse.model_validate(updated)
-
-    def pause_listing(
-        self,
-        listing_id: uuid.UUID,
-        current_seller_id: uuid.UUID,
-    ) -> ServiceListingResponse:
-        """
-        Transition a listing to 'paused' (temporarily hidden).
-        Only the owner can pause their own listing.
-        """
-        listing = self.repo.get(listing_id)
-        if not listing:
-            raise ListingNotFoundError(listing_id)
-        if listing.sellerId != current_seller_id:
-            raise ListingForbiddenError()
-        if listing.status not in ("active", "draft"):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=f"Cannot pause a listing with status '{listing.status}'.",
-            )
-        update = ServiceListingUpdate(status="paused")
-        updated = self.repo.update(listing, update)
-        return ServiceListingResponse.model_validate(updated)
 
     # ── Admin Operations ─────────────────────────────────────────────────────
 
@@ -354,10 +335,14 @@ class ServiceListingService:
             limit=page_size,
         )
         items = [
-            ServiceListingNearbyResponse(
-                **ServiceListingResponse.model_validate(listing).model_dump(),
-                distance_km=float(distance_km),
-            )
+            ServiceListingNearbyResponse.model_validate({
+                **listing.__dict__,
+                "distance_km": float(distance_km),
+                "city": listing.city,
+                "category": listing.category,
+                "seller": listing.seller,
+                "media": listing.media
+            })
             for listing, distance_km in results
         ]
         return ServiceListingNearbyListResponse(

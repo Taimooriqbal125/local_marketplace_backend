@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core import security
 from app.db.session import get_db
 from app.models.user import User
-from app.schemas.order import OrderCreate, OrderResponse, OrderUpdate
+from app.schemas.order import OrderCreate, OrderResponse, OrderAsSellerResponse, OrderAsBuyerResponse, OrderDetailResponse, OrderUpdate, OrderStatus
 from app.services.order_service import OrderService
 
 router = APIRouter(
@@ -33,19 +33,30 @@ def create_order(
     return service.create_order(obj_in, buyer_id=current_user.id)
 
 
-@router.get("/me", response_model=List[OrderResponse])
-def list_my_orders(
-    role: Literal["buyer", "seller"] = Query("buyer", description="View orders as buyer or seller"),
+@router.get("/me/as-seller", response_model=List[OrderAsSellerResponse])
+def list_my_orders_as_seller(
+    status: Optional[OrderStatus] = Query(None, description="Filter by status"),
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(security.get_current_user),
 ):
-    """
-    Retrieve orders associated with the current user.
-    """
+    """Retrieve orders where the current user is the seller (incoming requests)."""
     service = OrderService(db)
-    return service.list_my_orders(user_id=current_user.id, role=role, skip=skip, limit=limit)
+    return service.list_seller_orders(user_id=current_user.id, status=status, skip=skip, limit=limit)
+
+
+@router.get("/me/as-buyer", response_model=List[OrderAsBuyerResponse])
+def list_my_orders_as_buyer(
+    status: Optional[OrderStatus] = Query(None, description="Filter by status"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(security.get_current_user),
+):
+    """Retrieve orders where the current user is the buyer (outgoing requests)."""
+    service = OrderService(db)
+    return service.list_buyer_orders(user_id=current_user.id, status=status, skip=skip, limit=limit)
 
 
 @router.get("/{order_id}", response_model=OrderResponse)
@@ -56,13 +67,13 @@ def get_order(
 ):
     """
     Get detailed information for a specific order.
-    Note: In a production app, we'd add checks ensuring only buyer/seller/admin can see this.
+    Ensures requester is either the buyer or the seller.
     """
     service = OrderService(db)
-    return service.get_order(order_id)
+    return service.get_order(order_id, current_user_id=current_user.id)
 
 
-@router.patch("/{order_id}", response_model=OrderResponse)
+@router.patch("/{order_id}", response_model=OrderDetailResponse)
 def update_order_status(
     order_id: uuid.UUID,
     obj_in: OrderUpdate,

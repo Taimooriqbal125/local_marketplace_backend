@@ -21,7 +21,7 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
-    profile = relationship("Profile", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    profile = relationship("Profile", back_populates="user", uselist=False, cascade="all, delete-orphan", lazy="joined")
     posts = relationship("Post", back_populates="owner", cascade="all, delete-orphan")
     service_listings = relationship("ServiceListing", back_populates="seller", cascade="all, delete-orphan")
 

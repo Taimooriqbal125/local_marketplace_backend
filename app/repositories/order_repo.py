@@ -7,7 +7,9 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import func
 
 from app.models.order import Order
 from app.schemas.order import OrderCreate, OrderUpdate
@@ -22,9 +24,17 @@ class OrderRepository:
     # ── Single-record Lookups ────────────────────────────────────────────────
 
     def get(self, order_id: uuid.UUID) -> Optional[Order]:
-        """Fetch a specific order by its primary key."""
+        """Fetch a specific order by its primary key, with seller and listing relations."""
+        from sqlalchemy.orm import joinedload
+        from app.models.user import User
+
         return (
             self.db.query(Order)
+            .options(
+                joinedload(Order.seller).joinedload(User.profile),
+                joinedload(Order.buyer).joinedload(User.profile),
+                joinedload(Order.listing),
+            )
             .filter(Order.id == order_id)
             .first()
         )
@@ -41,22 +51,75 @@ class OrderRepository:
             .all()
         )
 
-    def get_by_buyer(self, buyer_id: uuid.UUID, skip: int = 0, limit: int = 20) -> list[Order]:
+    def get_by_buyer(self, buyer_id: uuid.UUID, status: Optional[str] = None, skip: int = 0, limit: int = 20) -> list[Order]:
         """Return orders requested by a specific buyer."""
-        return (
+        from sqlalchemy.orm import joinedload
+        from app.models.user import User
+        from app.models.service_listing import ServiceListing
+
+        query = (
             self.db.query(Order)
+            .options(
+                joinedload(Order.buyer).joinedload(User.profile),
+                joinedload(Order.listing).joinedload(ServiceListing.category),
+                joinedload(Order.listing).joinedload(ServiceListing.media),
+            )
             .filter(Order.buyerId == buyer_id)
+        )
+        if status:
+            query = query.filter(Order.status == status)
+        return (
+            query
             .order_by(Order.createdAt.desc())
             .offset(skip)
             .limit(limit)
             .all()
         )
 
-    def get_by_seller(self, seller_id: uuid.UUID, skip: int = 0, limit: int = 20) -> list[Order]:
+    def get_by_seller(self, seller_id: uuid.UUID, status: Optional[str] = None, skip: int = 0, limit: int = 20) -> list[Order]:
         """Return orders received by a specific seller."""
-        return (
+        from sqlalchemy.orm import joinedload
+        from app.models.user import User
+        from app.models.service_listing import ServiceListing
+
+        query = (
             self.db.query(Order)
+            .options(
+                joinedload(Order.buyer).joinedload(User.profile),
+                joinedload(Order.listing).joinedload(ServiceListing.category),
+                joinedload(Order.listing).joinedload(ServiceListing.media),
+            )
             .filter(Order.sellerId == seller_id)
+        )
+        if status:
+            query = query.filter(Order.status == status)
+        return (
+            query
+            .order_by(Order.createdAt.desc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+
+    def get_by_user(self, user_id: uuid.UUID, status: Optional[str] = None, skip: int = 0, limit: int = 20) -> list[Order]:
+        """Return orders where the user is either the buyer or the seller."""
+        from sqlalchemy.orm import joinedload
+        from app.models.user import User
+        from app.models.service_listing import ServiceListing
+
+        query = (
+            self.db.query(Order)
+            .options(
+                joinedload(Order.buyer).joinedload(User.profile),
+                joinedload(Order.listing).joinedload(ServiceListing.category),
+                joinedload(Order.listing).joinedload(ServiceListing.media),
+            )
+            .filter(or_(Order.buyerId == user_id, Order.sellerId == user_id))
+        )
+        if status:
+            query = query.filter(Order.status == status)
+        return (
+            query
             .order_by(Order.createdAt.desc())
             .offset(skip)
             .limit(limit)
@@ -97,17 +160,38 @@ class OrderRepository:
         for field, value in update_data.items():
             setattr(db_obj, field, value)
         
-        # Internal lifecycle management: update timestamps based on status
-        if obj_in.status == "accepted":
-            from sqlalchemy.sql import func
-            db_obj.acceptedAt = func.now()
-        elif obj_in.status == "completed":
-            from sqlalchemy.sql import func
-            db_obj.sellerCompletedAt = func.now()
-
         self.db.commit()
         self.db.refresh(db_obj)
         return db_obj
+
+    def mark_as_accepted(self, order: Order, agreed_price: Optional[int] = None) -> Order:
+        """Transition status to 'accepted' and set acceptedAt."""
+        from datetime import datetime, timezone
+        order.status = "accepted"
+        order.acceptedAt = datetime.now(timezone.utc)
+        if agreed_price:
+            order.agreedPrice = agreed_price
+        self.db.commit()
+        self.db.refresh(order)
+        return order
+
+    def mark_seller_complete(self, order: Order) -> Order:
+        """Record seller work completion."""
+        from datetime import datetime, timezone
+        order.status = "completed"
+        order.sellerCompletedAt = datetime.now(timezone.utc)
+        self.db.commit()
+        self.db.refresh(order)
+        return order
+
+    def mark_buyer_complete(self, order: Order) -> Order:
+        """Record buyer satisfaction and final completion."""
+        from datetime import datetime, timezone
+        order.status = "completed"
+        order.buyerCompletedAt = datetime.now(timezone.utc)
+        self.db.commit()
+        self.db.refresh(order)
+        return order
 
     def delete(self, db_obj: Order) -> None:
         """Remove an order record from the database."""

@@ -5,8 +5,9 @@ ListingMedia Service — business logic layer for service listing media.
 from __future__ import annotations
 
 import uuid
+from typing import Optional
 
-from fastapi import HTTPException, status
+from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.repositories.listing_media import ListingMediaRepository
@@ -16,6 +17,7 @@ from app.schemas.listing_media import (
     ListingMediaResponse,
     ListingMediaUpdate,
 )
+from app.storage.cloudinary_service import cloudinary_service
 
 
 # ---------------------------------------------------------------------------
@@ -81,7 +83,7 @@ class ListingMediaService:
         self, obj_in: ListingMediaCreate, current_seller_id: uuid.UUID
     ) -> ListingMediaResponse:
         """
-        Add a new image to a listing.
+        Add a new image record to a listing using an already-hosted URL.
         - 404 if listing doesn't exist
         - 403 if requester is not the owner
         """
@@ -92,6 +94,54 @@ class ListingMediaService:
             raise ListingForbiddenError()
 
         media = self.repo.create(obj_in)
+        return ListingMediaResponse.model_validate(media)
+
+    async def upload_and_add_media(
+        self,
+        listing_id: uuid.UUID,
+        file: UploadFile,
+        sort_order: int,
+        current_seller_id: uuid.UUID,
+        folder: Optional[str] = None,
+    ) -> ListingMediaResponse:
+        """
+        Upload an image file to Cloudinary, then persist a ListingMedia record.
+
+        Steps
+        -----
+        1. Verify listing exists and belongs to the caller.
+        2. Upload the file to Cloudinary (async, non-blocking).
+        3. Save the returned URL + public_id in the database.
+
+        Parameters
+        ----------
+        listing_id        : UUID of the target service listing.
+        file              : Raw UploadFile from the multipart request.
+        sort_order        : Display order (0 = primary thumbnail).
+        current_seller_id : ID of the authenticated user.
+        folder            : Optional Cloudinary sub-folder override.
+        """
+        # 1. Auth / existence check
+        listing = self.listing_repo.get(listing_id)
+        if not listing:
+            raise ListingNotFoundError(listing_id)
+        if listing.sellerId != current_seller_id:
+            raise ListingForbiddenError()
+
+        # 2. Upload to Cloudinary
+        upload_result = await cloudinary_service.upload_image(
+            file=file,
+            folder=folder or f"marketplace/listings/{listing_id}",
+        )
+
+        # 3. Persist the media record
+        payload = ListingMediaCreate(
+            listingId=listing_id,
+            imageUrl=upload_result["url"],
+            cloudinaryPublicId=upload_result["public_id"],
+            sortOrder=sort_order,
+        )
+        media = self.repo.create(payload)
         return ListingMediaResponse.model_validate(media)
 
     def update_media(
@@ -118,13 +168,13 @@ class ListingMediaService:
         updated = self.repo.update(media, obj_in)
         return ListingMediaResponse.model_validate(updated)
 
-    def delete_media(
-        self, media_id: uuid.UUID, current_seller_id: uuid.UUID
+    async def delete_media(
+        self, media_id: uuid.UUID, current_seller_id: uuid.UUID, is_admin: bool = False
     ) -> None:
         """
-        Delete a media record.
+        Delete a media record and its corresponding Cloudinary asset (if any).
         - 404 if media or associated listing doesn't exist
-        - 403 if requester is not the listing owner
+        - 403 if requester is not the listing owner (and not admin)
         """
         media = self.repo.get(media_id)
         if not media:
@@ -133,7 +183,13 @@ class ListingMediaService:
         listing = self.listing_repo.get(media.listingId)
         if not listing:
             raise ListingNotFoundError(media.listingId)
-        if listing.sellerId != current_seller_id:
+        
+        # Admin can delete anything, otherwise check ownership
+        if not is_admin and listing.sellerId != current_seller_id:
             raise ListingForbiddenError()
+
+        # Remove asset from Cloudinary first (best-effort; DB row is removed regardless)
+        if media.cloudinaryPublicId:
+            await cloudinary_service.delete_image(media.cloudinaryPublicId)
 
         self.repo.delete(media)

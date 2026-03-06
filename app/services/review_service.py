@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.repositories.review_repo import ReviewRepository
 from app.repositories.order_repo import OrderRepository
+from app.repositories.profile_repo import update_seller_rating
 from app.schemas.review import ReviewCreate
 from app.models.review import Review
 
@@ -70,11 +71,16 @@ class ReviewService:
                 )
 
         # 5. Create the review
-        return self.repo.create(
+        review = self.repo.create(
             obj_in=obj_in,
             reviewer_id=current_user_id,
             reviewed_user_id=reviewed_user_id
         )
+
+        # 6. Update Seller Reputation in Profile
+        update_seller_rating(self.db, reviewed_user_id, obj_in.rating)
+
+        return review
 
     def get_review(self, review_id: uuid.UUID) -> Review:
         """Fetch a single review or raise 404."""
@@ -86,13 +92,21 @@ class ReviewService:
             )
         return review
 
-    def list_received_reviews(self, user_id: uuid.UUID, skip: int = 0, limit: int = 20) -> List[Review]:
-        """Fetch reviews received by a user."""
-        return self.repo.get_received_by_user(user_id, skip=skip, limit=limit)
+    def list_received_reviews(
+        self, user_id: uuid.UUID, rating: Optional[int] = None, skip: int = 0, limit: int = 20
+    ) -> List[Review]:
+        """Fetch reviews received by a user with optional rating filter."""
+        return self.repo.get_received_by_user(user_id, rating=rating, skip=skip, limit=limit)
 
     def list_given_reviews(self, user_id: uuid.UUID, skip: int = 0, limit: int = 20) -> List[Review]:
         """Fetch reviews written by a user."""
         return self.repo.get_given_by_user(user_id, skip=skip, limit=limit)
+
+    def list_reviews_by_listing(
+        self, listing_id: uuid.UUID, skip: int = 0, limit: int = 20
+    ) -> List[Review]:
+        """Fetch all reviews for a specific service listing."""
+        return self.repo.get_by_listing(listing_id, skip=skip, limit=limit)
 
     def delete_review(self, review_id: uuid.UUID, current_user_id: uuid.UUID) -> None:
         """Delete a review (only the author or an admin can delete)."""

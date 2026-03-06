@@ -31,6 +31,9 @@ class Profile(Base):
     # photoUrl (string) — Optional
     photoUrl = Column(String(500), nullable=True)
 
+    # cloudinaryPublicId (string) — Optional
+    cloudinary_public_id = Column(String(500), nullable=True)
+
     # sellerRatingAvg (decimal 3,2) — Required, Default: 0.00
     sellerRatingAvg = Column(Numeric(3, 2), nullable=False, server_default=text("0.00"))
 

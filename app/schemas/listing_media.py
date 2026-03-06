@@ -21,9 +21,10 @@ class ListingMediaBase(BaseModel):
 # Create — what a client POSTs to add media to a listing
 # ---------------------------------------------------------------------------
 class ListingMediaCreate(ListingMediaBase):
-    """Payload for POST /service-listings/{id}/media (or similar)."""
+    """Payload for POST /listingmedia/ when you already have a URL (e.g. from external source)."""
 
     listingId: UUID = Field(..., description="The ID of the service listing this media belongs to")
+    cloudinaryPublicId: Optional[str] = Field(default=None, max_length=300, description="Cloudinary public_id for asset management")
 
 
 # ---------------------------------------------------------------------------
@@ -44,6 +45,7 @@ class ListingMediaResponse(ListingMediaBase):
 
     id: UUID
     listingId: UUID
+    cloudinaryPublicId: Optional[str] = None
     createdAt: datetime
 
     model_config = dict(from_attributes=True)

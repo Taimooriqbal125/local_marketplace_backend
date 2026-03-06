@@ -30,8 +30,13 @@ class ListingMedia(Base):
     )
 
     # imageUrl (string) — Required
-    # Stores the full URL string from the storage provider (e.g. Cloudinary/S3)
+    # Stores the HTTPS URL returned by Cloudinary after upload
     imageUrl: Mapped[str] = mapped_column(String(500), nullable=False)
+
+    # cloudinaryPublicId — Optional
+    # Stores the Cloudinary public_id so we can delete the asset on record removal.
+    # Nullable because records created directly with a URL won't have one.
+    cloudinaryPublicId: Mapped[str] = mapped_column(String(300), nullable=True)
 
     # sortOrder (int) — Default 0
     # Allows ordering of images (e.g. 0 is the primary thumbnail)

@@ -15,8 +15,10 @@ from app.schemas.services_listing import (
     ServiceListingCreate,
     ServiceListingFilterParams,
     ServiceListingListResponse,
+    ServiceListingMeListResponse,
     ServiceListingNearbyListResponse,
     ServiceListingResponse,
+    ServiceListingDetailResponse,
     ServiceListingUpdate,
 )
 from app.services.service_listing_service import ServiceListingService
@@ -122,12 +124,16 @@ def list_listings(
         min_price=filters.min_price,
         max_price=filters.max_price,
         search=filters.search,
+        top_selling=filters.top_selling,
+        top_rating=filters.top_rating,
+        city_slug=filters.city_slug,
+        category_slug=filters.category_slug,
         page=filters.page,
         page_size=filters.page_size,
     )
 
 
-@router.get("/me", response_model=ServiceListingListResponse)
+@router.get("/me", response_model=ServiceListingMeListResponse)
 def list_my_listings(
     listing_status: Optional[str] = Query(
         None,
@@ -158,12 +164,16 @@ def list_my_listings(
         min_price=filters.min_price,
         max_price=filters.max_price,
         search=filters.search,
+        top_selling=filters.top_selling,
+        top_rating=filters.top_rating,
+        city_slug=filters.city_slug,
+        category_slug=filters.category_slug,
         page=filters.page,
         page_size=filters.page_size,
     )
 
 
-@router.get("/{listing_id}", response_model=ServiceListingResponse)
+@router.get("/{listing_id}", response_model=ServiceListingDetailResponse)
 def get_listing(
     listing_id: uuid.UUID,
     db: Session = Depends(get_db),
@@ -205,6 +215,7 @@ def update_listing(
         listing_id=listing_id,
         obj_in=listing_in,
         current_seller_id=current_user.id,
+        is_admin=current_user.is_admin,
     )
 
 
@@ -227,27 +238,3 @@ def delete_listing(
     return {"message": "Service listing deleted successfully."}
 
 
-@router.post("/{listing_id}/publish", response_model=ServiceListingResponse)
-def publish_listing(
-    listing_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Activate a draft listing, making it visible to everyone.
-    """
-    service = ServiceListingService(db)
-    return service.publish_listing(listing_id=listing_id, current_seller_id=current_user.id)
-
-
-@router.post("/{listing_id}/pause", response_model=ServiceListingResponse)
-def pause_listing(
-    listing_id: uuid.UUID,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """
-    Temporarily hide an active listing.
-    """
-    service = ServiceListingService(db)
-    return service.pause_listing(listing_id=listing_id, current_seller_id=current_user.id)

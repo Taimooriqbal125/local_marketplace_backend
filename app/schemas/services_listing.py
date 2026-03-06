@@ -153,55 +153,129 @@ class ServiceListingUpdate(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Response
+# Seller Info for Cards
 # ---------------------------------------------------------------------------
-class ServiceListingResponse(BaseModel):
-    """
-    Full listing object returned by the API.
-    Deserializes PostGIS Geography → clean {latitude, longitude} object.
-    """
+class SellerProfileSchema(BaseModel):
+    """Simplified profile data for service cards."""
+    name: str
+    photoUrl: Optional[str] = None
+    sellerRatingAvg: Decimal = Field(default=Decimal("0.00"))
+    sellerRatingCount: int = 0
 
+    model_config = dict(from_attributes=True)
+
+
+# ---------------------------------------------------------------------------
+# Response Hierarchy
+# ---------------------------------------------------------------------------
+class ServiceListingCore(BaseModel):
+    """Essential card fields shared by all listing views."""
     id: UUID
-    sellerId: UUID
-    categoryId: int
-    cityId: Optional[UUID] = None
     title: str
     description: Optional[str] = None
     priceType: PriceType
     priceAmount: Optional[Decimal] = None
     isNegotiable: bool
     serviceLocation: str
+
+    model_config = dict(from_attributes=True)
+
+
+class ServiceListingBaseResponse(ServiceListingCore):
+    """Internal base for full views (includes metadata and radius)."""
+    categoryId: int
     serviceRadiusKm: float
-
-    # ✅ Deserialized from PostGIS WKBElement → clean lat/lon for the client
-    service_location_point: Optional[ServiceLocationPoint] = None
-
     status: ListingStatus
     createdAt: datetime
     updatedAt: datetime
 
-    model_config = dict(from_attributes=True)
+
+class ServiceListingMeResponse(ServiceListingBaseResponse):
+    """Cleaned-up response for /services/me (excludes public IDs)."""
+    pass
+
+
+class ServiceListingResponse(ServiceListingBaseResponse):
+    """Full public listing object with seller and location details."""
+    sellerId: UUID
+    cityId: Optional[UUID] = None
+    service_location_point: Optional[ServiceLocationPoint] = None
+    seller: Optional[SellerProfileSchema] = None
+
+    @field_validator("seller", mode="before")
+    @classmethod
+    def map_seller_profile(cls, v: object) -> Optional[dict]:
+        """Maps SQL User model → SellerProfileSchema."""
+        if isinstance(v, (dict, SellerProfileSchema)):
+            return v
+        if hasattr(v, "profile") and v.profile:
+            return {
+                "name": v.profile.name,
+                "photoUrl": v.profile.photoUrl,
+                "sellerRatingAvg": v.profile.sellerRatingAvg
+            }
+        return None
 
     @field_validator("service_location_point", mode="before")
     @classmethod
     def deserialize_geo(cls, v: object) -> Optional[ServiceLocationPoint]:
-        """
-        Convert PostGIS WKBElement → ServiceLocationPoint.
-        Same pattern as ProfileResponse.validate_geo().
-        """
-        if v is None:
-            return None
-        # Already a dict or ServiceLocationPoint (e.g. in tests)
-        if isinstance(v, dict):
-            return ServiceLocationPoint(**v)
-        if isinstance(v, ServiceLocationPoint):
-            return v
-        # PostGIS WKBElement from the DB
+        """Convert PostGIS WKBElement → ServiceLocationPoint."""
+        if v is None: return None
+        if isinstance(v, dict): return ServiceLocationPoint(**v)
+        if isinstance(v, ServiceLocationPoint): return v
         try:
             shape = to_shape(v)
             return ServiceLocationPoint(latitude=shape.y, longitude=shape.x)
-        except Exception:
-            return None
+        except Exception: return None
+
+
+class ServiceListingDetailResponse(ServiceListingCore):
+    """
+    Detailed listing view for the public.
+    Includes enriched seller and category data, excludes internal IDs.
+    """
+    cityName: Optional[str] = None
+    categoryName: str
+    seller: SellerProfileSchema
+    serviceRadiusKm: float
+    service_location_point: Optional[ServiceLocationPoint] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_relations(cls, data: any) -> any:
+        """Map city and category names from SQLAlchemy relations."""
+        if hasattr(data, "city") and data.city:
+            setattr(data, "cityName", data.city.name)
+        if hasattr(data, "category") and data.category:
+            setattr(data, "categoryName", data.category.name)
+        return data
+
+    @field_validator("seller", mode="before")
+    @classmethod
+    def map_seller_profile(cls, v: object) -> Optional[dict]:
+        """Maps SQL User model → SellerProfileSchema."""
+        if isinstance(v, (dict, SellerProfileSchema)):
+            return v
+        if v and hasattr(v, "profile") and v.profile:
+            return {
+                "name": v.profile.name,
+                "photoUrl": v.profile.photoUrl,
+                "sellerRatingAvg": v.profile.sellerRatingAvg,
+                "sellerRatingCount": v.profile.sellerRatingCount
+            }
+        return None
+
+    @field_validator("service_location_point", mode="before")
+    @classmethod
+    def deserialize_geo(cls, v: object) -> Optional[ServiceLocationPoint]:
+        """Convert PostGIS WKBElement → ServiceLocationPoint."""
+        if v is None: return None
+        if isinstance(v, dict): return ServiceLocationPoint(**v)
+        if isinstance(v, ServiceLocationPoint): return v
+        try:
+            shape = to_shape(v)
+            return ServiceLocationPoint(latitude=shape.y, longitude=shape.x)
+        except Exception: return None
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +338,22 @@ class ServiceListingFilterParams:
             Optional[int],
             Query(alias="categoryId", gt=0, description="Filter by category ID"),
         ] = None,
+        city_slug: Annotated[
+            Optional[str],
+            Query(alias="citySlug", description="Filter by city slug"),
+        ] = None,
+        category_slug: Annotated[
+            Optional[str],
+            Query(alias="categorySlug", description="Filter by category slug"),
+        ] = None,
+        top_selling: Annotated[
+            bool,
+            Query(alias="topSelling", description="Sort by top selling sellers"),
+        ] = False,
+        top_rating: Annotated[
+            bool,
+            Query(alias="topRating", description="Sort by top rated sellers"),
+        ] = False,
         page: Annotated[
             int,
             Query(ge=1, description="Page number (1-based)"),
@@ -279,6 +369,10 @@ class ServiceListingFilterParams:
         self.max_price = max_price
         self.search = search
         self.category_id = category_id
+        self.city_slug = city_slug
+        self.category_slug = category_slug
+        self.top_selling = top_selling
+        self.top_rating = top_rating
         self.page = page
         self.page_size = page_size
 
@@ -297,11 +391,76 @@ class NearbySearchParams(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Nearby response — extends standard response with distance info
+# Nearby response — custom slimmed-down card for UI
 # ---------------------------------------------------------------------------
-class ServiceListingNearbyResponse(ServiceListingResponse):
-    """Extended response for nearby search — includes distance from user."""
+class ServiceListingNearbyResponse(ServiceListingCore):
+    """Extended response for nearby search — highly optimized for UI cards."""
     distance_km: Optional[float] = None
+    cityName: Optional[str] = None
+    categoryName: str
+    imageUrl: Optional[str] = None
+    seller: Optional[SellerProfileSchema] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_relations(cls, data: any) -> any:
+        """
+        Pull cityName, categoryName, and primary imageUrl from relations.
+        Handles both SQLAlchemy objects and dictionaries.
+        """
+        # If it's a dict
+        if isinstance(data, dict):
+            # Map City/Category Names
+            city = data.get("city")
+            if city and hasattr(city, "name"):
+                data["cityName"] = city.name
+            
+            category = data.get("category")
+            if category and hasattr(category, "name"):
+                data["categoryName"] = category.name
+
+            # Map Primary Image URL
+            media = data.get("media", [])
+            if media:
+                # media is likely a list of ListingMedia objects or dicts
+                # Sort by sortOrder then take the first
+                try:
+                    sorted_media = sorted(media, key=lambda x: getattr(x, "sortOrder", 0) if hasattr(x, "sortOrder") else x.get("sortOrder", 0))
+                    first_item = sorted_media[0]
+                    data["imageUrl"] = getattr(first_item, "imageUrl", None) if hasattr(first_item, "imageUrl") else first_item.get("imageUrl")
+                except Exception:
+                    pass
+            
+            return data
+
+        # If it's an object (SQLAlchemy model)
+        obj_dict = {k: v for k, v in data.__dict__.items() if not k.startswith('_')}
+        
+        # City/Category
+        obj_dict["cityName"] = data.city.name if hasattr(data, "city") and data.city else None
+        obj_dict["categoryName"] = data.category.name if hasattr(data, "category") and data.category else "Other"
+        
+        # Primary Image
+        if hasattr(data, "media") and data.media:
+            # Relationship is sorted by sortOrder in the model definition already
+            obj_dict["imageUrl"] = data.media[0].imageUrl
+            
+        obj_dict["seller"] = getattr(data, "seller", None)
+        return obj_dict
+
+    @field_validator("seller", mode="before")
+    @classmethod
+    def map_seller_profile(cls, v: object) -> Optional[dict]:
+        """Maps SQL User model → SellerProfileSchema."""
+        if isinstance(v, (dict, SellerProfileSchema)):
+            return v
+        if v and hasattr(v, "profile") and v.profile:
+            return {
+                "name": v.profile.name,
+                "photoUrl": v.profile.photoUrl,
+                "sellerRatingAvg": v.profile.sellerRatingAvg
+            }
+        return None
 
 
 class ServiceListingNearbyListResponse(BaseModel):
@@ -314,11 +473,19 @@ class ServiceListingNearbyListResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Paginated list response helper
+# Paginated list response helpers
 # ---------------------------------------------------------------------------
 class ServiceListingListResponse(BaseModel):
-    """Wrapper for paginated listing results."""
+    """Wrapper for paginated public results."""
     total: int
     page: int
     pageSize: int
     results: list[ServiceListingResponse]
+
+
+class ServiceListingMeListResponse(BaseModel):
+    """Wrapper for paginated seller-specific results."""
+    total: int
+    page: int
+    pageSize: int
+    results: list[ServiceListingMeResponse]

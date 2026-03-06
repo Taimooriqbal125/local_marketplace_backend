@@ -3,15 +3,15 @@ Review Routes — API endpoints for reviews.
 """
 
 import uuid
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.core.security import get_current_user
 from app.models.user import User
-from app.schemas.review import ReviewCreate, ReviewResponse
+from app.schemas.review import ReviewCreate, ReviewResponse, ReviewReceivedResponse, ReviewForServiceResponse
 from app.services.review_service import ReviewService
 
 router = APIRouter(prefix="/reviews", tags=["Reviews"])
@@ -35,28 +35,54 @@ def create_review(
     return service.create_review(obj_in, current_user.id)
 
 
-@router.get("/received/{user_id}", response_model=List[ReviewResponse])
+@router.get("/me/received", response_model=List[ReviewReceivedResponse])
+def get_my_received_reviews(
+    rating: Optional[int] = Query(None, ge=1, le=5, description="Filter by star rating"),
+    skip: int = 0,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all reviews received by the authenticated user."""
+    service = ReviewService(db)
+    return service.list_received_reviews(current_user.id, rating=rating, skip=skip, limit=limit)
+
+
+@router.get("/me/given", response_model=List[ReviewResponse])
+def get_my_given_reviews(
+    skip: int = 0,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get all reviews written by the authenticated user."""
+    service = ReviewService(db)
+    return service.list_given_reviews(current_user.id, skip=skip, limit=limit)
+
+
+@router.get("/received/{user_id}", response_model=List[ReviewReceivedResponse])
 def get_received_reviews(
     user_id: uuid.UUID,
+    rating: Optional[int] = Query(None, ge=1, le=5, description="Filter by star rating"),
     skip: int = 0,
     limit: int = 20,
     db: Session = Depends(get_db)
 ):
     """Get all reviews received by a specific user."""
     service = ReviewService(db)
-    return service.list_received_reviews(user_id, skip=skip, limit=limit)
+    return service.list_received_reviews(user_id, rating=rating, skip=skip, limit=limit)
 
 
-@router.get("/given/{user_id}", response_model=List[ReviewResponse])
-def get_given_reviews(
-    user_id: uuid.UUID,
+@router.get("/service/{listing_id}", response_model=List[ReviewForServiceResponse])
+def get_reviews_by_service(
+    listing_id: uuid.UUID,
     skip: int = 0,
     limit: int = 20,
     db: Session = Depends(get_db)
 ):
-    """Get all reviews written by a specific user."""
+    """Get all reviews for a specific service listing."""
     service = ReviewService(db)
-    return service.list_given_reviews(user_id, skip=skip, limit=limit)
+    return service.list_reviews_by_listing(listing_id, skip=skip, limit=limit)
 
 
 @router.get("/{id}", response_model=ReviewResponse)

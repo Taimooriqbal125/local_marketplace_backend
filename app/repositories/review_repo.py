@@ -24,13 +24,29 @@ class ReviewRepository:
         return self.db.query(Review).filter(Review.orderId == order_id).all()
 
     def get_received_by_user(
-        self, user_id: uuid.UUID, skip: int = 0, limit: int = 20
+        self, user_id: uuid.UUID, rating: Optional[int] = None, skip: int = 0, limit: int = 20
     ) -> List[Review]:
-        """Return reviews received by a user, newest first."""
-        return (
+        """Return reviews received by a user, newest first. Includes joined relations."""
+        from sqlalchemy.orm import joinedload
+        from app.models.user import User
+        from app.models.order import Order
+        from app.models.service_listing import ServiceListing
+
+        query = (
             self.db.query(Review)
+            .options(
+                joinedload(Review.reviewer).joinedload(User.profile),
+                joinedload(Review.order).joinedload(Order.listing).joinedload(ServiceListing.category),
+                joinedload(Review.order).joinedload(Order.listing).joinedload(ServiceListing.media),
+            )
             .filter(Review.reviewedUserId == user_id)
-            .order_by(Review.createdAt.desc())
+        )
+
+        if rating is not None:
+            query = query.filter(Review.rating == rating)
+
+        return (
+            query.order_by(Review.createdAt.desc())
             .offset(skip)
             .limit(limit)
             .all()
@@ -43,6 +59,30 @@ class ReviewRepository:
         return (
             self.db.query(Review)
             .filter(Review.reviewerId == user_id)
+            .order_by(Review.createdAt.desc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+
+    def get_by_listing(
+        self, listing_id: uuid.UUID, skip: int = 0, limit: int = 20
+    ) -> List[Review]:
+        """Return all reviews for a specific service listing, newest first."""
+        from sqlalchemy.orm import joinedload
+        from app.models.user import User
+        from app.models.order import Order
+        from app.models.service_listing import ServiceListing
+
+        return (
+            self.db.query(Review)
+            .join(Order, Review.orderId == Order.id)
+            .options(
+                joinedload(Review.reviewer).joinedload(User.profile),
+                joinedload(Review.order).joinedload(Order.listing).joinedload(ServiceListing.category),
+                joinedload(Review.order).joinedload(Order.listing).joinedload(ServiceListing.media),
+            )
+            .filter(Order.listingId == listing_id)
             .order_by(Review.createdAt.desc())
             .offset(skip)
             .limit(limit)

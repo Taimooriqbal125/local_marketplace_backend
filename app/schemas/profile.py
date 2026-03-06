@@ -23,6 +23,7 @@ class ProfileBase(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     bio: Optional[str] = None
     photoUrl: Optional[str] = Field(default=None, max_length=500)
+    cloudinary_public_id: Optional[str] = Field(default=None, max_length=500)
     sellerStatus: Literal["none", "active", "suspended"] = "none"
     sellerCompletedOrdersCount: Optional[int] = 0
     
@@ -51,6 +52,7 @@ class ProfileUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     bio: Optional[str] = None
     photoUrl: Optional[str] = Field(default=None, max_length=500)
+    cloudinary_public_id: Optional[str] = Field(default=None, max_length=500)
     sellerStatus: Optional[Literal["none", "active", "suspended"]] = None
     sellerCompletedOrdersCount: Optional[int] = Field(default=None, ge=0)
     
@@ -65,17 +67,19 @@ class ProfileUpdate(BaseModel):
     sellerRatingAvg: Optional[Decimal] = Field(default=None, ge=0, le=9.99)
     sellerRatingCount: Optional[int] = Field(default=None, ge=0)
 
+class ProfileIdMixin(BaseModel):
+    """Mixin to ensure userId is the first field in the schema."""
+    userId: UUID
 
-class ProfileResponse(ProfileBase):
+
+class ProfileResponse(ProfileIdMixin, ProfileBase):
     """Profile object returned by the API."""
 
-    userId: UUID
     sellerRatingAvg: Decimal
     sellerRatingCount: int
     sellerCompletedOrdersCount: int
     createdAt: datetime
     updatedAt: datetime
-    name: str
 
     @field_validator("last_location_point", "default_location_point", mode="before")
     @classmethod

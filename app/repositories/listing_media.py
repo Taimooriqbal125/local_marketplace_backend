@@ -48,6 +48,7 @@ class ListingMediaRepository:
             listingId=obj_in.listingId,
             imageUrl=obj_in.imageUrl,
             sortOrder=obj_in.sortOrder,
+            cloudinaryPublicId=obj_in.cloudinaryPublicId,
         )
         self.db.add(db_obj)
         self.db.commit()
