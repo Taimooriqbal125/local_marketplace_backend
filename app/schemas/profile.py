@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from geoalchemy2.elements import WKBElement
 from geoalchemy2.shape import to_shape
 
@@ -109,6 +109,56 @@ class ProfileResponse(ProfileIdMixin, ProfileBase):
         if isinstance(v, dict):
             return LocationPoint(**v)
         return v
+
+    class Config:
+        from_attributes = True
+
+
+class PrivateProfileResponse(BaseModel):
+    """
+    Detailed profile response for the authenticated user's own dashboard.
+    Includes identity (email) and aggregate metrics (totalServices).
+    """
+
+    id: UUID
+    name: str
+    email: str
+    photoUrl: Optional[str] = None
+    sellerStatus: str
+    sellerCompletedOrdersCount: int
+    sellerRatingCount: int
+    totalServices: int
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_user_data(cls, data: any) -> any:
+        """
+        Map data from User model.
+        Expected input: User instance with 'profile' and 'service_listings' loaded.
+        """
+        # If we already have a dict (e.g. from a test or manual construction)
+        if isinstance(data, dict):
+            return data
+
+        # Check if we have a User object with a profile
+        profile = getattr(data, "profile", None)
+        if not profile:
+            return data
+
+        # Calculate total services
+        service_listings = getattr(data, "service_listings", [])
+        total_services = len(service_listings)
+
+        return {
+            "id": profile.userId,
+            "name": profile.name,
+            "email": getattr(data, "email", "Unknown"),
+            "photoUrl": profile.photoUrl,
+            "sellerStatus": profile.sellerStatus,
+            "sellerCompletedOrdersCount": profile.sellerCompletedOrdersCount,
+            "sellerRatingCount": profile.sellerRatingCount,
+            "totalServices": total_services,
+        }
 
     class Config:
         from_attributes = True

@@ -5,13 +5,13 @@ Order Routes — API endpoints for managing service orders.
 import uuid
 from typing import List, Literal, Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core import security
 from app.db.session import get_db
 from app.models.user import User
-from app.schemas.order import OrderCreate, OrderResponse, OrderAsSellerResponse, OrderAsBuyerResponse, OrderDetailResponse, OrderUpdate, OrderStatus
+from app.schemas.order import OrderCreate, OrderResponse, OrderAsSellerResponse, OrderAsBuyerResponse, SellerOrdersResponse, OrderDetailAsBuyerResponse, OrderDetailAsSellerResponse, OrderDetailResponse, OrderUpdate, OrderStatus
 from app.services.order_service import OrderService
 
 router = APIRouter(
@@ -33,7 +33,7 @@ def create_order(
     return service.create_order(obj_in, buyer_id=current_user.id)
 
 
-@router.get("/me/as-seller", response_model=List[OrderAsSellerResponse])
+@router.get("/me/as-seller", response_model=SellerOrdersResponse)
 def list_my_orders_as_seller(
     status: Optional[OrderStatus] = Query(None, description="Filter by status"),
     skip: int = Query(0, ge=0),
@@ -59,16 +59,49 @@ def list_my_orders_as_buyer(
     return service.list_buyer_orders(user_id=current_user.id, status=status, skip=skip, limit=limit)
 
 
+@router.get("/{order_id}/as-buyer", response_model=OrderDetailAsBuyerResponse)
+def get_order_as_buyer(
+    order_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(security.get_current_user),
+):
+    """Get full order details for the buyer."""
+    service = OrderService(db)
+    order = service.get_order(order_id, current_user_id=current_user.id)
+    
+    if order.buyerId != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not the buyer for this order",
+        )
+    return order
+
+
+@router.get("/{order_id}/as-seller", response_model=OrderDetailAsSellerResponse)
+def get_order_as_seller(
+    order_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(security.get_current_user),
+):
+    """Get full order details for the seller."""
+    service = OrderService(db)
+    order = service.get_order(order_id, current_user_id=current_user.id)
+    
+    if order.sellerId != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not the seller for this order",
+        )
+    return order
+
+
 @router.get("/{order_id}", response_model=OrderResponse)
 def get_order(
     order_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(security.get_current_user),
 ):
-    """
-    Get detailed information for a specific order.
-    Ensures requester is either the buyer or the seller.
-    """
+    """General view for a specific order. Use /as-buyer or /as-seller for role-tailored dashboards."""
     service = OrderService(db)
     return service.get_order(order_id, current_user_id=current_user.id)
 

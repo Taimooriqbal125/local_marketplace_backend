@@ -64,8 +64,21 @@ class OrderService:
         return order
 
     def list_seller_orders(self, user_id: uuid.UUID, status: Optional[str] = None, skip: int = 0, limit: int = 20):
-        """List orders where the user is the seller (incoming requests)."""
-        return self.repo.get_by_seller(user_id, status=status, skip=skip, limit=limit)
+        """List orders where the user is the seller (incoming requests), wrapped with total count."""
+        from app.repositories.profile_repo import get_profile_by_user_id
+        
+        # 1. Fetch the orders
+        orders = self.repo.get_by_seller(user_id, status=status, skip=skip, limit=limit)
+        
+        # 2. Fetch the seller profile for the total count
+        profile = get_profile_by_user_id(self.db, user_id)
+        total_orders = profile.sellerCompletedOrdersCount if profile else 0
+        
+        # 3. Return wrapped response
+        return {
+            "totalOrders": total_orders,
+            "orders": orders
+        }
 
     def list_buyer_orders(self, user_id: uuid.UUID, status: Optional[str] = None, skip: int = 0, limit: int = 20):
         """List orders where the user is the buyer (outgoing requests)."""

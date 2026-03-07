@@ -11,13 +11,13 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.core.security import get_current_user
 from app.models.user import User
-from app.schemas.review import ReviewCreate, ReviewResponse, ReviewReceivedResponse, ReviewForServiceResponse
+from app.schemas.review import ReviewCreate, ReviewResponse, ReviewReceivedResponse, ReviewForServiceResponse, ReviewCreateResponse, ReviewGivenResponse
 from app.services.review_service import ReviewService
 
 router = APIRouter(prefix="/reviews", tags=["Reviews"])
 
 
-@router.post("/", response_model=ReviewResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=ReviewCreateResponse, status_code=status.HTTP_201_CREATED)
 def create_review(
     obj_in: ReviewCreate,
     db: Session = Depends(get_db),
@@ -48,7 +48,7 @@ def get_my_received_reviews(
     return service.list_received_reviews(current_user.id, rating=rating, skip=skip, limit=limit)
 
 
-@router.get("/me/given", response_model=List[ReviewResponse])
+@router.get("/me/given", response_model=List[ReviewGivenResponse])
 def get_my_given_reviews(
     skip: int = 0,
     limit: int = 20,
@@ -59,18 +59,6 @@ def get_my_given_reviews(
     service = ReviewService(db)
     return service.list_given_reviews(current_user.id, skip=skip, limit=limit)
 
-
-@router.get("/received/{user_id}", response_model=List[ReviewReceivedResponse])
-def get_received_reviews(
-    user_id: uuid.UUID,
-    rating: Optional[int] = Query(None, ge=1, le=5, description="Filter by star rating"),
-    skip: int = 0,
-    limit: int = 20,
-    db: Session = Depends(get_db)
-):
-    """Get all reviews received by a specific user."""
-    service = ReviewService(db)
-    return service.list_received_reviews(user_id, rating=rating, skip=skip, limit=limit)
 
 
 @router.get("/service/{listing_id}", response_model=List[ReviewForServiceResponse])

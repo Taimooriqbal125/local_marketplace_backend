@@ -55,9 +55,17 @@ class ReviewRepository:
     def get_given_by_user(
         self, user_id: uuid.UUID, skip: int = 0, limit: int = 20
     ) -> List[Review]:
-        """Return reviews written by a user, newest first."""
+        """Return reviews written by a user, newest first. Includes service context."""
+        from sqlalchemy.orm import joinedload
+        from app.models.order import Order
+        from app.models.service_listing import ServiceListing
+
         return (
             self.db.query(Review)
+            .options(
+                joinedload(Review.order).joinedload(Order.listing).joinedload(ServiceListing.category),
+                joinedload(Review.order).joinedload(Order.listing).joinedload(ServiceListing.media),
+            )
             .filter(Review.reviewerId == user_id)
             .order_by(Review.createdAt.desc())
             .offset(skip)
@@ -93,6 +101,9 @@ class ReviewRepository:
         self, obj_in: ReviewCreate, reviewer_id: uuid.UUID, reviewed_user_id: uuid.UUID
     ) -> Review:
         """Create a new review in the database."""
+        from sqlalchemy.orm import joinedload
+        from app.models.user import User
+
         db_obj = Review(
             orderId=obj_in.orderId,
             reviewerId=reviewer_id,
@@ -102,8 +113,14 @@ class ReviewRepository:
         )
         self.db.add(db_obj)
         self.db.commit()
-        self.db.refresh(db_obj)
-        return db_obj
+        
+        # Reload with relationships for the response
+        return (
+            self.db.query(Review)
+            .options(joinedload(Review.reviewed_user).joinedload(User.profile))
+            .filter(Review.id == db_obj.id)
+            .first()
+        )
 
     def delete(self, db_obj: Review) -> None:
         """Remove a review from the database."""

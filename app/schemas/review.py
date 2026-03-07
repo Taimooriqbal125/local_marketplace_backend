@@ -137,3 +137,81 @@ class ReviewForServiceResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ---------------------------------------------------------------------------
+# POST /reviews/ — creation response
+# ---------------------------------------------------------------------------
+class ReviewCreateResponse(BaseModel):
+    """Refined response for review creation."""
+
+    id: UUID
+    createdAt: datetime
+    rating: int
+    sellerName: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_relationships(cls, data: any) -> any:
+        """Map reviewed_user.profile.name to sellerName."""
+        if not hasattr(data, "reviewed_user"):
+            return data
+
+        seller_name = "Unknown Seller"
+        if data.reviewed_user and data.reviewed_user.profile:
+            seller_name = data.reviewed_user.profile.name
+
+        return {
+            "id": data.id,
+            "createdAt": data.createdAt,
+            "rating": data.rating,
+            "sellerName": seller_name,
+        }
+
+    class Config:
+        from_attributes = True
+
+
+# ---------------------------------------------------------------------------
+# /reviews/me/given — reviews written by the buyer
+# ---------------------------------------------------------------------------
+class ReviewGivenResponse(BaseModel):
+    """Refined response for reviews given by the user, with service context."""
+
+    id: UUID
+    rating: int
+    comment: Optional[str] = None
+    createdAt: datetime
+
+    # Service context
+    serviceName: str
+    categoryName: str
+    imageUrl: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_relationships(cls, data: any) -> any:
+        """Map listing, category, and media info."""
+        if not hasattr(data, "order") or not data.order or not data.order.listing:
+            return data
+
+        listing = data.order.listing
+        service_name = listing.title
+        category_name = listing.category.name if listing.category else "Other"
+        
+        service_image = None
+        if listing.media:
+            service_image = listing.media[0].imageUrl
+
+        return {
+            "id": data.id,
+            "rating": data.rating,
+            "comment": data.comment,
+            "createdAt": data.createdAt,
+            "serviceName": service_name,
+            "categoryName": category_name,
+            "imageUrl": service_image,
+        }
+
+    class Config:
+        from_attributes = True

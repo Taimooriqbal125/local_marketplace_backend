@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -85,9 +85,6 @@ class OrderAsSellerResponse(BaseModel):
     """
 
     id: UUID
-    status: OrderStatus
-    proposedPrice: int
-    notes: Optional[str] = None
     createdAt: datetime
 
     # Buyer info (who's requesting)
@@ -96,13 +93,250 @@ class OrderAsSellerResponse(BaseModel):
 
     # Service context
     serviceName: str
+    imageUrl: Optional[str] = None
     categoryName: str
 
     @model_validator(mode="before")
     @classmethod
     def map_relationships(cls, data: any) -> any:
-        """Extract buyer profile and service info."""
-        if not hasattr(data, "buyer"):
+        """Extract buyer profile, seller profile (for count), and service info."""
+        if not hasattr(data, "buyer") or not hasattr(data, "seller"):
+            return data
+
+        buyer_name = "Unknown"
+        buyer_photo = None
+        if data.buyer and data.buyer.profile:
+            buyer_name = data.buyer.profile.name
+            buyer_photo = data.buyer.profile.photoUrl
+
+
+        service_name = "Unknown Service"
+        service_image = None
+        category_name = "Other"
+        if data.listing:
+            service_name = data.listing.title
+            if data.listing.category:
+                category_name = data.listing.category.name
+            if data.listing.media:
+                service_image = data.listing.media[0].imageUrl
+
+        return {
+            "id": data.id,
+            "createdAt": data.createdAt,
+            "buyerName": buyer_name,
+            "buyerPhotoUrl": buyer_photo,
+            "serviceName": service_name,
+            "imageUrl": service_image,
+            "categoryName": category_name,
+        }
+
+    model_config = dict(from_attributes=True)
+
+
+class SellerOrdersResponse(BaseModel):
+    """
+    Wrapped response for the seller's dashboard.
+    Includes total completed orders count for the seller.
+    """
+    totalOrders: int
+    orders: List[OrderAsSellerResponse]
+
+    model_config = dict(from_attributes=True)
+
+
+# ---------------------------------------------------------------------------
+# /orders/me/as-buyer — what a buyer sees in their dashboard
+# ---------------------------------------------------------------------------
+class OrderAsBuyerResponse(BaseModel):
+    """
+    Order response for the buyer's dashboard.
+    Shows the services ordered by the user.
+    """
+
+    id: UUID
+    createdAt: datetime
+
+    # Service context
+    serviceName: str
+    imageUrl: Optional[str] = None
+    categoryName: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_relationships(cls, data: any) -> any:
+        """Extract service info."""
+        service_name = "Unknown Service"
+        service_image = None
+        category_name = "Other"
+        
+        if data.listing:
+            service_name = data.listing.title
+            if data.listing.category:
+                category_name = data.listing.category.name
+            if data.listing.media:
+                service_image = data.listing.media[0].imageUrl
+
+        return {
+            "id": data.id,
+            "createdAt": data.createdAt,
+            "serviceName": service_name,
+            "imageUrl": service_image,
+            "categoryName": category_name,
+        }
+
+    model_config = dict(from_attributes=True)
+
+
+
+# ---------------------------------------------------------------------------
+# OrderDetailResponse — used by PATCH and general GET
+# ---------------------------------------------------------------------------
+class OrderDetailResponse(BaseModel):
+    """Simplified detail response including status and essential names."""
+
+    id: UUID
+    status: OrderStatus
+    sellerCompletedAt: Optional[datetime] = None
+    buyerCompletedAt: Optional[datetime] = None
+
+    # Enriched fields
+    sellerName: str
+    buyerName: str
+    serviceName: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_relationships(cls, data: any) -> any:
+        """Extract names from ORM relationships."""
+        if not hasattr(data, "seller") or not hasattr(data, "buyer") or not hasattr(data, "listing"):
+            return data
+
+        seller_name = "Unknown"
+        if data.seller and data.seller.profile:
+            seller_name = data.seller.profile.name
+
+        buyer_name = "Unknown"
+        if data.buyer and data.buyer.profile:
+            buyer_name = data.buyer.profile.name
+
+        service_name = "Unknown Service"
+        if data.listing:
+            service_name = data.listing.title
+
+        return {
+            "id": data.id,
+            "status": data.status,
+            "sellerCompletedAt": data.sellerCompletedAt,
+            "buyerCompletedAt": data.buyerCompletedAt,
+            "sellerName": seller_name,
+            "buyerName": buyer_name,
+            "serviceName": service_name,
+        }
+
+    model_config = dict(from_attributes=True)
+
+
+# ---------------------------------------------------------------------------
+# /orders/{order_id}/as-buyer — detailed view for the buyer
+# ---------------------------------------------------------------------------
+class OrderDetailAsBuyerResponse(BaseModel):
+    """Detailed order view for buyers."""
+
+    id: UUID
+    status: OrderStatus
+    createdAt: datetime
+    acceptedAt: Optional[datetime] = None
+    sellerCompletedAt: Optional[datetime] = None
+    buyerCompletedAt: Optional[datetime] = None
+
+    # Service info
+    serviceName: str
+    imageUrl: Optional[str] = None
+    categoryName: str
+    priceType: str
+    price: float  # Map from priceAmount
+
+    # Seller info
+    sellerName: str
+    sellerPhotoUrl: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_relationships(cls, data: any) -> any:
+        """Map listing and seller data."""
+        if not hasattr(data, "seller") or not hasattr(data, "listing"):
+            return data
+
+        seller_name = "Unknown"
+        seller_photo = None
+        if data.seller and data.seller.profile:
+            seller_name = data.seller.profile.name
+            seller_photo = data.seller.profile.photoUrl
+
+        service_name = "Unknown Service"
+        service_image = None
+        category_name = "Other"
+        price_type = "fixed"
+        price_amount = 0.0
+
+        if data.listing:
+            service_name = data.listing.title
+            price_type = data.listing.priceType
+            price_amount = float(data.listing.priceAmount or 0)
+            if data.listing.category:
+                category_name = data.listing.category.name
+            if data.listing.media:
+                service_image = data.listing.media[0].imageUrl
+
+        return {
+            "id": data.id,
+            "status": data.status,
+            "createdAt": data.createdAt,
+            "acceptedAt": data.acceptedAt,
+            "sellerCompletedAt": data.sellerCompletedAt,
+            "buyerCompletedAt": data.buyerCompletedAt,
+            "serviceName": service_name,
+            "imageUrl": service_image,
+            "categoryName": category_name,
+            "priceType": price_type,
+            "price": price_amount,
+            "sellerName": seller_name,
+            "sellerPhotoUrl": seller_photo,
+        }
+
+    model_config = dict(from_attributes=True)
+
+
+# ---------------------------------------------------------------------------
+# /orders/{order_id}/as-seller — detailed view for the seller
+# ---------------------------------------------------------------------------
+class OrderDetailAsSellerResponse(BaseModel):
+    """Detailed order view for sellers."""
+
+    id: UUID
+    status: OrderStatus
+    createdAt: datetime
+    acceptedAt: Optional[datetime] = None
+    sellerCompletedAt: Optional[datetime] = None
+    buyerCompletedAt: Optional[datetime] = None
+
+    # Buyer info
+    buyerName: str
+    buyerPhotoUrl: Optional[str] = None
+
+    # Order details
+    proposedPrice: int
+    notes: Optional[str] = None
+
+    # Context
+    serviceName: str
+    categoryName: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_relationships(cls, data: any) -> any:
+        """Map buyer and context data."""
+        if not hasattr(data, "buyer") or not hasattr(data, "listing"):
             return data
 
         buyer_name = "Unknown"
@@ -121,131 +355,16 @@ class OrderAsSellerResponse(BaseModel):
         return {
             "id": data.id,
             "status": data.status,
-            "proposedPrice": data.proposedPrice,
-            "notes": data.notes,
             "createdAt": data.createdAt,
-            "buyerName": buyer_name,
-            "buyerPhotoUrl": buyer_photo,
-            "serviceName": service_name,
-            "categoryName": category_name,
-        }
-
-    model_config = dict(from_attributes=True)
-
-
-# ---------------------------------------------------------------------------
-# /orders/me/as-buyer — what a buyer sees in their dashboard
-# ---------------------------------------------------------------------------
-class OrderAsBuyerResponse(BaseModel):
-    """
-    Order response for the buyer's dashboard.
-    Shows who is providing the service.
-    """
-
-    id: UUID
-    status: OrderStatus
-    proposedPrice: int
-    notes: Optional[str] = None
-    createdAt: datetime
-
-    # Seller info (who's providing)
-    sellerName: str
-    sellerPhotoUrl: Optional[str] = None
-
-    # Service context
-    serviceName: str
-    serviceImageUrl: Optional[str] = None
-    categoryName: str
-
-    @model_validator(mode="before")
-    @classmethod
-    def map_relationships(cls, data: any) -> any:
-        """Extract seller profile and service info."""
-        if not hasattr(data, "seller"):
-            return data
-
-        seller_name = "Unknown"
-        seller_photo = None
-        if data.seller and data.seller.profile:
-            seller_name = data.seller.profile.name
-            seller_photo = data.seller.profile.photoUrl
-
-        service_name = "Unknown Service"
-        service_image = None
-        category_name = "Other"
-        if data.listing:
-            service_name = data.listing.title
-            if data.listing.category:
-                category_name = data.listing.category.name
-            if data.listing.media:
-                service_image = data.listing.media[0].imageUrl
-
-        return {
-            "id": data.id,
-            "status": data.status,
-            "proposedPrice": data.proposedPrice,
-            "notes": data.notes,
-            "createdAt": data.createdAt,
-            "sellerName": seller_name,
-            "sellerPhotoUrl": seller_photo,
-            "serviceName": service_name,
-            "serviceImageUrl": service_image,
-            "categoryName": category_name,
-        }
-
-    model_config = dict(from_attributes=True)
-
-
-
-# ---------------------------------------------------------------------------
-# /orders/{order_id} — focused detail response
-# ---------------------------------------------------------------------------
-class OrderDetailResponse(BaseModel):
-    """
-    Focused order detail response for /orders/{order_id}.
-    Only essential tracking fields plus seller and service names.
-    """
-
-    id: UUID
-    status: OrderStatus
-    sellerCompletedAt: Optional[datetime] = None
-    buyerCompletedAt: Optional[datetime] = None
-
-    # Enriched fields
-    sellerName: str
-    buyerName: str
-    serviceName: str
-
-    @model_validator(mode="before")
-    @classmethod
-    def map_relationships(cls, data: any) -> any:
-        """Extract seller name and service name from ORM relationships."""
-        if not hasattr(data, "seller"):
-            return data
-
-        # Seller profile
-        seller_name = "Unknown"
-        if data.seller and data.seller.profile:
-            seller_name = data.seller.profile.name
-
-        # Buyer profile
-        buyer_name = "Unknown"
-        if data.buyer and data.buyer.profile:
-            buyer_name = data.buyer.profile.name
-
-        # Service listing
-        service_name = "Unknown Service"
-        if data.listing:
-            service_name = data.listing.title
-
-        return {
-            "id": data.id,
-            "status": data.status,
+            "acceptedAt": data.acceptedAt,
             "sellerCompletedAt": data.sellerCompletedAt,
             "buyerCompletedAt": data.buyerCompletedAt,
-            "sellerName": seller_name,
             "buyerName": buyer_name,
+            "buyerPhotoUrl": buyer_photo,
+            "proposedPrice": data.proposedPrice,
+            "notes": data.notes,
             "serviceName": service_name,
+            "categoryName": category_name,
         }
 
     model_config = dict(from_attributes=True)

@@ -28,12 +28,15 @@ class OrderRepository:
         from sqlalchemy.orm import joinedload
         from app.models.user import User
 
+        from app.models.service_listing import ServiceListing
+
         return (
             self.db.query(Order)
             .options(
                 joinedload(Order.seller).joinedload(User.profile),
                 joinedload(Order.buyer).joinedload(User.profile),
-                joinedload(Order.listing),
+                joinedload(Order.listing).joinedload(ServiceListing.media),
+                joinedload(Order.listing).joinedload(ServiceListing.category),
             )
             .filter(Order.id == order_id)
             .first()
@@ -52,7 +55,7 @@ class OrderRepository:
         )
 
     def get_by_buyer(self, buyer_id: uuid.UUID, status: Optional[str] = None, skip: int = 0, limit: int = 20) -> list[Order]:
-        """Return orders requested by a specific buyer."""
+        """Return orders requested by a specific buyer, with seller and listing context."""
         from sqlalchemy.orm import joinedload
         from app.models.user import User
         from app.models.service_listing import ServiceListing
@@ -60,7 +63,6 @@ class OrderRepository:
         query = (
             self.db.query(Order)
             .options(
-                joinedload(Order.buyer).joinedload(User.profile),
                 joinedload(Order.listing).joinedload(ServiceListing.category),
                 joinedload(Order.listing).joinedload(ServiceListing.media),
             )
@@ -77,7 +79,7 @@ class OrderRepository:
         )
 
     def get_by_seller(self, seller_id: uuid.UUID, status: Optional[str] = None, skip: int = 0, limit: int = 20) -> list[Order]:
-        """Return orders received by a specific seller."""
+        """Return orders received by a specific seller, with buyer and listing context."""
         from sqlalchemy.orm import joinedload
         from app.models.user import User
         from app.models.service_listing import ServiceListing
@@ -87,7 +89,6 @@ class OrderRepository:
             .options(
                 joinedload(Order.buyer).joinedload(User.profile),
                 joinedload(Order.listing).joinedload(ServiceListing.category),
-                joinedload(Order.listing).joinedload(ServiceListing.media),
             )
             .filter(Order.sellerId == seller_id)
         )

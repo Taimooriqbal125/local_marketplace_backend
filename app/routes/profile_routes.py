@@ -16,7 +16,7 @@ from typing import Annotated, Optional
 import json
 
 from app.db.session import get_db
-from app.schemas.profile import ProfileCreate, ProfileUpdate, ProfileResponse, LocationPoint
+from app.schemas.profile import ProfileCreate, ProfileUpdate, ProfileResponse, LocationPoint, PrivateProfileResponse
 from app.services import profile_service
 from app.core.security import get_current_user
 from app.models.user import User
@@ -52,13 +52,12 @@ async def create_profile(
     return await profile_service.create_profile(db, profile_obj, photoUrl)
 
 
-@router.get("/me", response_model=ProfileResponse)
+@router.get("/me", response_model=PrivateProfileResponse)
 def get_my_profile(
-    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Retrieve the authenticated user's profile."""
-    return profile_service.get_profile(db, current_user.id)
+    """Retrieve the authenticated user's profile and key metrics."""
+    return current_user
 
 
 @router.patch("/me/location", response_model=ProfileResponse)
