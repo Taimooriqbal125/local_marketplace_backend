@@ -16,8 +16,19 @@ from geoalchemy2.elements import WKTElement
 
 
 def get_profile_by_user_id(db: Session, user_id: UUID) -> Optional[Profile]:
-    """Fetch a single profile by user ID (which is the primary key)."""
-    return db.query(Profile).filter(Profile.userId == user_id).first()
+    """Fetch a single profile by user ID with its user and service listings."""
+    from sqlalchemy.orm import joinedload, selectinload
+    from app.models.user import User
+    
+    return (
+        db.query(Profile)
+        .options(
+            joinedload(Profile.user),
+            selectinload(Profile.user, User.service_listings)
+        )
+        .filter(Profile.userId == user_id)
+        .first()
+    )
 
 
 def get_all_profiles(
@@ -29,8 +40,9 @@ def get_all_profiles(
     top_selling: bool = False,
     top_rating: bool = False,
 ) -> list[Profile]:
-    """Get a paginated and filtered list of all profiles."""
-    query = db.query(Profile)
+    """Get a paginated and filtered list of all profiles. Includes joined user for email."""
+    from sqlalchemy.orm import joinedload
+    query = db.query(Profile).options(joinedload(Profile.user))
     if is_banned is not None:
         query = query.filter(Profile.isBanned == is_banned)
     if seller_status is not None:

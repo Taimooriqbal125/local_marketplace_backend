@@ -165,6 +165,12 @@ class SellerProfileSchema(BaseModel):
     model_config = dict(from_attributes=True)
 
 
+class SellerProfileDetailSchema(SellerProfileSchema):
+    """Enriched profile data for service details, including profileId and phone."""
+    profileId: UUID
+    phone: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Response Hierarchy
 # ---------------------------------------------------------------------------
@@ -236,7 +242,7 @@ class ServiceListingDetailResponse(ServiceListingCore):
     """
     cityName: Optional[str] = None
     categoryName: str
-    seller: SellerProfileSchema
+    seller: SellerProfileDetailSchema
     serviceRadiusKm: float
     service_location_point: Optional[ServiceLocationPoint] = None
 
@@ -253,15 +259,17 @@ class ServiceListingDetailResponse(ServiceListingCore):
     @field_validator("seller", mode="before")
     @classmethod
     def map_seller_profile(cls, v: object) -> Optional[dict]:
-        """Maps SQL User model → SellerProfileSchema."""
-        if isinstance(v, (dict, SellerProfileSchema)):
+        """Maps SQL User model → SellerProfileDetailSchema."""
+        if isinstance(v, (dict, SellerProfileDetailSchema)):
             return v
         if v and hasattr(v, "profile") and v.profile:
             return {
+                "profileId": v.profile.userId,
                 "name": v.profile.name,
                 "photoUrl": v.profile.photoUrl,
                 "sellerRatingAvg": v.profile.sellerRatingAvg,
-                "sellerRatingCount": v.profile.sellerRatingCount
+                "sellerRatingCount": v.profile.sellerRatingCount,
+                "phone": v.phone if hasattr(v, "phone") else None
             }
         return None
 

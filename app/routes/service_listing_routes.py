@@ -39,7 +39,7 @@ def get_nearby_listings_from_profile(
     """
     Find nearby services using your saved profile location.
     No need to send lat/lng — reads from your last_location_point automatically.
-    Update your location first via PATCH /profiles/me/location.
+    Update your location first via PATCH /profile/me/location.
     """
     service = ServiceListingService(db)
     return service.search_nearby_from_profile(

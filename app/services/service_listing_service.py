@@ -382,7 +382,7 @@ class ServiceListingService:
         if profile.last_location_point is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No location saved on your profile. Update your location first via PATCH /profiles/me/location",
+                detail="No location saved on your profile. Update your location first via PATCH /profile/me/location",
             )
         # Convert PostGIS WKBElement → lat/lng
         shape = to_shape(profile.last_location_point)

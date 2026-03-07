@@ -63,6 +63,7 @@ class OrderRepository:
         query = (
             self.db.query(Order)
             .options(
+                joinedload(Order.seller).joinedload(User.profile),
                 joinedload(Order.listing).joinedload(ServiceListing.category),
                 joinedload(Order.listing).joinedload(ServiceListing.media),
             )

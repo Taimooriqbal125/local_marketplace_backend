@@ -162,3 +162,77 @@ class PrivateProfileResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ProfilePublicResponse(BaseModel):
+    """
+    Publicly accessible profile summary, primarily for admin listing.
+    Includes identity and status.
+    """
+
+    id: UUID
+    userName: str
+    image: Optional[str] = None
+    status: str
+    email: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_profile_data(cls, data: any) -> any:
+        """Map fields from Profile and User models."""
+        if isinstance(data, dict):
+            return data
+
+        # Mapping for the public list
+        return {
+            "id": data.userId,
+            "userName": data.name,
+            "image": data.photoUrl,
+            "status": data.sellerStatus,
+            "email": data.user.email if (hasattr(data, "user") and data.user) else "Unknown",
+        }
+
+    class Config:
+        from_attributes = True
+
+
+class PublicProfileDetailResponse(BaseModel):
+    """
+    Enhanced public profile detail response.
+    Includes contact info and service counts.
+    """
+
+    id: UUID
+    name: str
+    image: Optional[str] = None
+    completedordercount: int
+    avgRating: Decimal
+    createdat: datetime
+    phone: Optional[str] = None
+    email: str
+    totalService: int
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_profile_detail(cls, data: any) -> any:
+        """Map fields from Profile and joined User/Services relations."""
+        if isinstance(data, dict):
+            return data
+
+        user = getattr(data, "user", None)
+        service_listings = getattr(user, "service_listings", []) if user else []
+
+        return {
+            "id": data.userId,
+            "name": data.name,
+            "image": data.photoUrl,
+            "completedordercount": data.sellerCompletedOrdersCount,
+            "avgRating": data.sellerRatingAvg,
+            "createdat": data.createdAt,
+            "phone": user.phone if user else None,
+            "email": user.email if user else "Unknown",
+            "totalService": len(service_listings),
+        }
+
+    class Config:
+        from_attributes = True

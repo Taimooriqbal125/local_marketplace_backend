@@ -12,11 +12,19 @@ All business logic is in the service, all DB work is in the repository.
 from fastapi import APIRouter, Depends, status, Query, HTTPException, File, UploadFile, Form, BackgroundTasks
 from sqlalchemy.orm import Session
 from uuid import UUID
-from typing import Annotated, Optional
+from typing import Annotated, Optional, List
 import json
 
 from app.db.session import get_db
-from app.schemas.profile import ProfileCreate, ProfileUpdate, ProfileResponse, LocationPoint, PrivateProfileResponse
+from app.schemas.profile import (
+    ProfileCreate,
+    ProfileUpdate,
+    ProfileResponse,
+    LocationPoint,
+    PrivateProfileResponse,
+    ProfilePublicResponse,
+    PublicProfileDetailResponse
+)
 from app.services import profile_service
 from app.core.security import get_current_user
 from app.models.user import User
@@ -74,7 +82,7 @@ async def update_my_location(
     return await profile_service.update_profile(db, current_user.id, update_data)
 
 
-@router.get("/", response_model=list[ProfileResponse])
+@router.get("/", response_model=List[ProfilePublicResponse])
 def get_all_profiles(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=100),
@@ -83,25 +91,17 @@ def get_all_profiles(
     top_selling: bool = Query(False, alias="topSelling"),
     top_rating: bool = Query(False, alias="topRating"),
     db: Session = Depends(get_db),
-    current_user: Optional[User] = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """
-    Retrieve a list of profiles (Public).
-
-    - **skip**: number of records to skip
-    - **limit**: max number of records to return
-    - **isBanned**: filter by banned status (true/false)
-    - **sellerStatus**: [ADMIN ONLY] filter by seller status (active/suspended)
-    - **topSelling**: [ADMIN ONLY] sort by top selling
-    - **topRating**: [ADMIN ONLY] sort by top rating
+    Retrieve a list of profiles (Admin Only).
     """
-    # Authorization check for admin-only filters
-    if any([seller_status is not None, top_selling, top_rating]):
-        if not current_user or not current_user.is_admin:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only admins can use these filters or sorting options"
-            )
+    # Restricted to Admin Only
+    if not current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can access the full profile listing."
+        )
 
     return profile_service.get_all_profiles(
         db,
@@ -114,7 +114,7 @@ def get_all_profiles(
     )
 
 
-@router.get("/{user_id}", response_model=ProfileResponse)
+@router.get("/{user_id}", response_model=PublicProfileDetailResponse)
 def get_profile(user_id: UUID, db: Session = Depends(get_db)):
     """Retrieve a single profile by user ID (Public)."""
     return profile_service.get_profile(db, user_id)

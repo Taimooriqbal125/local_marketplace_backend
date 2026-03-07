@@ -32,8 +32,10 @@ class ServiceListingRepository:
     # ── Single-record Lookups ────────────────────────────────────────────────
 
     def get(self, listing_id: uuid.UUID) -> Optional[ServiceListing]:
+        from sqlalchemy.orm import joinedload
         return (
             self.db.query(ServiceListing)
+            .options(joinedload(ServiceListing.seller))
             .filter(ServiceListing.id == listing_id)
             .first()
         )

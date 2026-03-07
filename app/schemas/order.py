@@ -85,6 +85,7 @@ class OrderAsSellerResponse(BaseModel):
     """
 
     id: UUID
+    status: OrderStatus
     createdAt: datetime
 
     # Buyer info (who's requesting)
@@ -122,6 +123,7 @@ class OrderAsSellerResponse(BaseModel):
 
         return {
             "id": data.id,
+            "status": data.status,
             "createdAt": data.createdAt,
             "buyerName": buyer_name,
             "buyerPhotoUrl": buyer_photo,
@@ -161,10 +163,15 @@ class OrderAsBuyerResponse(BaseModel):
     imageUrl: Optional[str] = None
     categoryName: str
 
+    # Seller info
+    sellerName: str
+    sellerPhotoUrl: Optional[str] = None
+    sellerPhone: Optional[str] = None
+
     @model_validator(mode="before")
     @classmethod
     def map_relationships(cls, data: any) -> any:
-        """Extract service info."""
+        """Extract service info and seller contact details."""
         service_name = "Unknown Service"
         service_image = None
         category_name = "Other"
@@ -176,12 +183,24 @@ class OrderAsBuyerResponse(BaseModel):
             if data.listing.media:
                 service_image = data.listing.media[0].imageUrl
 
+        seller_name = "Unknown"
+        seller_photo = None
+        seller_phone = None
+        if data.seller:
+            seller_phone = data.seller.phone
+            if data.seller.profile:
+                seller_name = data.seller.profile.name
+                seller_photo = data.seller.profile.photoUrl
+
         return {
             "id": data.id,
             "createdAt": data.createdAt,
             "serviceName": service_name,
             "imageUrl": service_image,
             "categoryName": category_name,
+            "sellerName": seller_name,
+            "sellerPhotoUrl": seller_photo,
+            "sellerPhone": seller_phone,
         }
 
     model_config = dict(from_attributes=True)
@@ -202,12 +221,13 @@ class OrderDetailResponse(BaseModel):
     # Enriched fields
     sellerName: str
     buyerName: str
+    buyerPhone: Optional[str] = None
     serviceName: str
 
     @model_validator(mode="before")
     @classmethod
     def map_relationships(cls, data: any) -> any:
-        """Extract names from ORM relationships."""
+        """Extract names and contact from ORM relationships."""
         if not hasattr(data, "seller") or not hasattr(data, "buyer") or not hasattr(data, "listing"):
             return data
 
@@ -216,8 +236,11 @@ class OrderDetailResponse(BaseModel):
             seller_name = data.seller.profile.name
 
         buyer_name = "Unknown"
-        if data.buyer and data.buyer.profile:
-            buyer_name = data.buyer.profile.name
+        buyer_phone = None
+        if data.buyer:
+            buyer_phone = data.buyer.phone
+            if data.buyer.profile:
+                buyer_name = data.buyer.profile.name
 
         service_name = "Unknown Service"
         if data.listing:
@@ -230,6 +253,7 @@ class OrderDetailResponse(BaseModel):
             "buyerCompletedAt": data.buyerCompletedAt,
             "sellerName": seller_name,
             "buyerName": buyer_name,
+            "buyerPhone": buyer_phone,
             "serviceName": service_name,
         }
 
