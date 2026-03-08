@@ -18,7 +18,6 @@ from typing import Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from app.repositories.service_listing_repo import ServiceListingRepository
-from app.repositories.profile_repo import get_profile_by_user_id
 from geoalchemy2.shape import to_shape
 from app.schemas.services_listing import (
     ServiceListingCreate,
@@ -307,12 +306,15 @@ class ServiceListingService:
         latitude: float,
         longitude: float,
         radius_km: float = 10.0,
+        status: Optional[str] = "active",
         category_id: Optional[int] = None,
         is_negotiable: Optional[bool] = None,
         price_type: Optional[str] = None,
         min_price: Optional[Decimal] = None,
         max_price: Optional[Decimal] = None,
         search: Optional[str] = None,
+        top_selling: bool = False,
+        top_rating: bool = False,
         page: int = 1,
         page_size: int = 20,
     ) -> ServiceListingNearbyListResponse:
@@ -325,12 +327,15 @@ class ServiceListingService:
             latitude=latitude,
             longitude=longitude,
             radius_km=radius_km,
+            status=status,
             category_id=category_id,
             is_negotiable=is_negotiable,
             price_type=price_type,
             min_price=min_price,
             max_price=max_price,
             search=search,
+            top_selling=top_selling,
+            top_rating=top_rating,
             skip=skip,
             limit=page_size,
         )
@@ -359,12 +364,15 @@ class ServiceListingService:
         user_id: uuid.UUID,
         db: Session,
         radius_km: float = 10.0,
+        status: Optional[str] = "active",
         category_id: Optional[int] = None,
         is_negotiable: Optional[bool] = None,
         price_type: Optional[str] = None,
         min_price: Optional[Decimal] = None,
         max_price: Optional[Decimal] = None,
         search: Optional[str] = None,
+        top_selling: bool = False,
+        top_rating: bool = False,
         page: int = 1,
         page_size: int = 20,
     ) -> ServiceListingNearbyListResponse:
@@ -390,12 +398,15 @@ class ServiceListingService:
             latitude=shape.y,
             longitude=shape.x,
             radius_km=radius_km,
+            status=status,
             category_id=category_id,
             is_negotiable=is_negotiable,
             price_type=price_type,
             min_price=min_price,
             max_price=max_price,
             search=search,
+            top_selling=top_selling,
+            top_rating=top_rating,
             page=page,
             page_size=page_size,
         )

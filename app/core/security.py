@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.session import get_db
 from app.models.user import User
-from app.repositories import user_repo
+from app.repositories import UserRepository
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
@@ -67,10 +67,8 @@ def get_current_user(
 
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-        print(f"DEBUG: Decoded Payload: {payload}")  # Debug print
         user_id: str | None = payload.get("sub")
         if not user_id:
-            print("DEBUG: Missing 'sub' in payload")
             raise credentials_exception
 
         # Validate UUID format
@@ -83,7 +81,7 @@ def get_current_user(
         print(f"DEBUG: UUID Conversion Error: {e}")
         raise credentials_exception
 
-    user = user_repo.get_user_by_id(db, user_id=user_uuid)
+    user = UserRepository(db).get(user_uuid)
     if user is None:
         print(f"DEBUG: User not found in DB: {user_uuid}")
         raise credentials_exception

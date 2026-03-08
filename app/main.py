@@ -21,11 +21,18 @@ app = FastAPI(
 )
 
 
+from app.core import tasks
+
 # ---------- Startup event ----------
 @app.on_event("startup")
 def on_startup():
     """Runs once when the server starts — creates DB tables if they don't exist."""
     init_db()
+    # Start background scheduler
+    try:
+        tasks.start_scheduler()
+    except Exception as e:
+        print(f"[ERROR] Failed to start scheduler: {e}")
 
 
 # ---------- Register routers ----------

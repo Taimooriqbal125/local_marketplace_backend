@@ -18,7 +18,7 @@ from typing import Optional
 
 from app.db.session import get_db
 from app.schemas.user import UserCreate, UserUpdate, UserResponse, Token
-from app.services import user_service
+from app.services import UserService
 from app.core import security, config
 from app.models.user import User
 
@@ -39,8 +39,9 @@ def login(db: Session = Depends(get_db), form_data: OAuth2PasswordRequestForm = 
     FastAPI's OAuth2PasswordRequestForm expects 'username' (we use email) and 'password'.
     """
     # 1. Fetch user
+    service = UserService(db)
     try:
-        user = user_service.get_user_by_email(db, email=form_data.username)
+        user = service.get_user_by_email(email=form_data.username)
     except HTTPException:
         user = None
     
@@ -61,21 +62,6 @@ def login(db: Session = Depends(get_db), form_data: OAuth2PasswordRequestForm = 
 
 
 # ============================================================
-#  GET /users/admin-only  →  PROTECTED ROUTE
-# ============================================================
-@router.get("/admin-only", response_model=dict)
-def test_admin_route(current_admin: User = Depends(security.get_current_admin_user)):
-    """
-    This route is only accessible by ADMINS.
-    It uses 'get_current_admin_user' as a dependency.
-    """
-    return {
-        "message": f"Welcome Admin {current_admin.name}!",
-        "secret_data": "You are powerful. Here is the secret key: 42"
-    }
-
-
-# ============================================================
 #  POST /users  →  Create a new user
 # ============================================================
 @router.post("/", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -86,7 +72,8 @@ def create_user(user_data: UserCreate, db: Session = Depends(get_db)):
     - **email**: must be unique
     - **password**: will be hashed before saving
     """
-    return user_service.create_user(db, user_data)
+    service = UserService(db)
+    return service.create_user(user_data)
 
 
 # ============================================================
@@ -109,8 +96,9 @@ def get_all_users(
     - **is_active**: filter by active status (true/false)
     - **is_admin**: filter by admin status (true/false)
     """
-    return user_service.get_all_users(
-        db, skip=skip, limit=limit, is_active=is_active, is_admin=is_admin
+    service = UserService(db)
+    return service.get_all_users(
+        skip=skip, limit=limit, is_active=is_active, is_admin=is_admin
     )
 
 
@@ -120,7 +108,8 @@ def get_all_users(
 @router.get("/{user_id}", response_model=UserResponse)
 def get_user(user_id: UUID, db: Session = Depends(get_db)):
     """Retrieve a single user by their ID."""
-    return user_service.get_user(db, user_id)
+    service = UserService(db)
+    return service.get_user(user_id)
 
 
 # ============================================================
@@ -149,7 +138,8 @@ def update_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only admins can change is_admin or is_active",
         )
-    return user_service.update_user(db, user_id, user_data)
+    service = UserService(db)
+    return service.update_user(user_id, user_data)
 
 
 #  DELETE /users/{user_id}  →  Delete a user (admin only)
@@ -161,5 +151,6 @@ def delete_user(
     _: User = Depends(security.get_current_admin_user),
 ):
     """Permanently delete a user. Admin only."""
-    user_service.delete_user(db, user_id)
+    service = UserService(db)
+    service.delete_user(user_id)
     return {"message": "User deleted successfully."}

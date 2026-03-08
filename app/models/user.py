@@ -22,7 +22,6 @@ class User(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     profile = relationship("Profile", back_populates="user", uselist=False, cascade="all, delete-orphan", lazy="joined")
-    posts = relationship("Post", back_populates="owner", cascade="all, delete-orphan")
     service_listings = relationship("ServiceListing", back_populates="seller", cascade="all, delete-orphan")
 
     # Orders where this user is the buyer
@@ -34,3 +33,7 @@ class User(Base):
     # Reviews
     reviews_given = relationship("Review", back_populates="reviewer", foreign_keys="[Review.reviewerId]")
     reviews_received = relationship("Review", back_populates="reviewed_user", foreign_keys="[Review.reviewedUserId]")
+
+    # Notifications
+    notifications_received = relationship("Notification", back_populates="user", foreign_keys="Notification.userId", cascade="all, delete-orphan")
+    notifications_sent = relationship("Notification", back_populates="sender", foreign_keys="Notification.senderId")

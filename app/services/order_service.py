@@ -10,8 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.repositories.order_repo import OrderRepository
 from app.repositories.service_listing_repo import ServiceListingRepository
-from app.repositories.profile_repo import increment_seller_orders_count
 from app.schemas.order import OrderCreate, OrderUpdate
+from app.services.notification_service import NotificationService
+from app.models.notification import NotificationType
 
 
 class OrderService:
@@ -21,8 +22,20 @@ class OrderService:
         self.db = db
         self.repo = OrderRepository(db)
         self.listing_repo = ServiceListingRepository(db)
+        self.notification_service = NotificationService(db)
 
-    def create_order(self, obj_in: OrderCreate, buyer_id: uuid.UUID):
+    def _get_user_details(self, user_id: uuid.UUID):
+        """Helper to fetch name, email and phone for a user."""
+        profile = get_profile_by_user_id(self.db, user_id)
+        if not profile:
+            return "Unknown User", "N/A", "N/A"
+        
+        name = profile.name
+        email = profile.user.email if profile.user else "N/A"
+        phone = profile.user.phone if profile.user else "N/A"
+        return name, email, phone
+
+    async def create_order(self, obj_in: OrderCreate, buyer_id: uuid.UUID):
         """
         Create a new order request.
         Validates listing existence and prevents self-purchase.
@@ -43,9 +56,23 @@ class OrderService:
             )
 
         # 3. Create order record
-        return self.repo.create(obj_in, buyer_id=buyer_id, seller_id=listing.sellerId)
+        order = self.repo.create(obj_in, buyer_id=buyer_id, seller_id=listing.sellerId)
 
-    def get_order(self, order_id: uuid.UUID, current_user_id: uuid.UUID):
+        # 4. Trigger Notification for Seller
+        buyer_name, buyer_email, buyer_phone = self._get_user_details(buyer_id)
+        await self.notification_service.send_notification(
+            user_id=listing.sellerId,
+            sender_id=buyer_id,
+            order_id=order.id,
+            listing_id=listing.id,
+            type=NotificationType.ORDER_REQUESTED,
+            title="New Order Received",
+            body=f"{buyer_name} has requested your service '{listing.title}'. You may contact them at {buyer_email} or {buyer_phone}."
+        )
+
+        return order
+
+    async def get_order(self, order_id: uuid.UUID, current_user_id: uuid.UUID):
         """Fetch an order by ID, raise 404 if not found, or 403 if unauthorized."""
         order = self.repo.get(order_id)
         if not order:
@@ -63,9 +90,8 @@ class OrderService:
             
         return order
 
-    def list_seller_orders(self, user_id: uuid.UUID, status: Optional[str] = None, skip: int = 0, limit: int = 20):
+    async def list_seller_orders(self, user_id: uuid.UUID, status: Optional[str] = None, skip: int = 0, limit: int = 20):
         """List orders where the user is the seller (incoming requests), wrapped with total count."""
-        from app.repositories.profile_repo import get_profile_by_user_id
         
         # 1. Fetch the orders
         orders = self.repo.get_by_seller(user_id, status=status, skip=skip, limit=limit)
@@ -80,15 +106,15 @@ class OrderService:
             "orders": orders
         }
 
-    def list_buyer_orders(self, user_id: uuid.UUID, status: Optional[str] = None, skip: int = 0, limit: int = 20):
+    async def list_buyer_orders(self, user_id: uuid.UUID, status: Optional[str] = None, skip: int = 0, limit: int = 20):
         """List orders where the user is the buyer (outgoing requests)."""
         return self.repo.get_by_buyer(user_id, status=status, skip=skip, limit=limit)
 
-    def update_order_status(self, order_id: uuid.UUID, obj_in: OrderUpdate, current_user_id: uuid.UUID):
+    async def update_order_status(self, order_id: uuid.UUID, obj_in: OrderUpdate, current_user_id: uuid.UUID):
         """
         Update order status with ownership/role enforcement.
         """
-        order = self.get_order(order_id, current_user_id=current_user_id)
+        order = await self.get_order(order_id, current_user_id=current_user_id)
         is_seller = order.sellerId == current_user_id
         is_buyer = order.buyerId == current_user_id
 
@@ -106,7 +132,19 @@ class OrderService:
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=f"Cannot accept order in '{order.status}' status",
                     )
-                return self.repo.mark_as_accepted(order, agreed_price=obj_in.agreedPrice)
+                updated_order = self.repo.mark_as_accepted(order, agreed_price=obj_in.agreedPrice)
+                
+                # Notify Buyer
+                seller_name, seller_email, seller_phone = self._get_user_details(current_user_id)
+                await self.notification_service.send_notification(
+                    user_id=order.buyerId,
+                    sender_id=current_user_id,
+                    order_id=order.id,
+                    type=NotificationType.ORDER_ACCEPTED,
+                    title="Order Accepted",
+                    body=f"Your order request has been accepted by {seller_name}. You may contact them at {seller_email} or {seller_phone}."
+                )
+                return updated_order
 
             # Case B: Completion (Buyer-first flow)
             if obj_in.status == "completed":
@@ -123,7 +161,19 @@ class OrderService:
                             status_code=status.HTTP_400_BAD_REQUEST,
                             detail="You have already confirmed this order as completed",
                         )
-                    return self.repo.mark_buyer_complete(order)
+                    updated_order = self.repo.mark_buyer_complete(order)
+                    
+                    # Notify Seller
+                    buyer_name, _, _ = self._get_user_details(current_user_id)
+                    await self.notification_service.send_notification(
+                        user_id=order.sellerId,
+                        sender_id=current_user_id,
+                        order_id=order.id,
+                        type=NotificationType.BUYER_MARKED_COMPLETED,
+                        title="Buyer Confirmed Completion",
+                        body=f"{buyer_name} has marked the order as completed. Please finalize it."
+                    )
+                    return updated_order
                 
                 # Seller finalizes AFTER buyer confirmation
                 if is_seller:
@@ -140,6 +190,17 @@ class OrderService:
                     result = self.repo.mark_seller_complete(order)
                     # Increment seller completed order count
                     increment_seller_orders_count(self.db, order.sellerId)
+                    
+                    # Notify Buyer
+                    seller_name, _, _ = self._get_user_details(current_user_id)
+                    await self.notification_service.send_notification(
+                        user_id=order.buyerId,
+                        sender_id=current_user_id,
+                        order_id=order.id,
+                        type=NotificationType.ORDER_COMPLETED,
+                        title="Order Finalized",
+                        body=f"{seller_name} has finalized the order. We’d appreciate it if you could leave a review."
+                    )
                     return result
 
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unauthorized role")
@@ -157,5 +218,23 @@ class OrderService:
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="Buyers can only cancel an order before it is accepted",
                     )
+                
+                updated_order = self.repo.update(order, obj_in)
+                
+                # Notify the other party
+                target_user_id = order.sellerId if is_buyer else order.buyerId
+                canceller_name, _, _ = self._get_user_details(current_user_id)
+                await self.notification_service.send_notification(
+                    user_id=target_user_id,
+                    sender_id=current_user_id,
+                    order_id=order.id,
+                    type=NotificationType.ORDER_CANCELLED,
+                    title="Order Cancelled",
+                    body=f"{canceller_name} has cancelled the order. You may try placing another request later."
+                )
+                return updated_order
 
         return self.repo.update(order, obj_in)
+
+    # Note: Notification deletion is handled in NotificationService and its own routes.
+    # Removed incorrect implementation here to avoid repository confusion.

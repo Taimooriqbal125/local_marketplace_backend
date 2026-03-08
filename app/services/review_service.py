@@ -10,9 +10,10 @@ from sqlalchemy.orm import Session
 
 from app.repositories.review_repo import ReviewRepository
 from app.repositories.order_repo import OrderRepository
-from app.repositories.profile_repo import update_seller_rating
 from app.schemas.review import ReviewCreate
 from app.models.review import Review
+from app.services.notification_service import NotificationService
+from app.models.notification import NotificationType
 
 
 class ReviewService:
@@ -22,8 +23,9 @@ class ReviewService:
         self.db = db
         self.repo = ReviewRepository(db)
         self.order_repo = OrderRepository(db)
+        self.notification_service = NotificationService(db)
 
-    def create_review(self, obj_in: ReviewCreate, current_user_id: uuid.UUID) -> Review:
+    async def create_review(self, obj_in: ReviewCreate, current_user_id: uuid.UUID) -> Review:
         """
         Create a new review for an order.
         
@@ -79,6 +81,24 @@ class ReviewService:
 
         # 6. Update Seller Reputation in Profile
         update_seller_rating(self.db, reviewed_user_id, obj_in.rating)
+
+        # 7. Trigger Notification for Seller
+        reviewer_profile = get_profile_by_user_id(self.db, current_user_id)
+        reviewer_name = reviewer_profile.name if reviewer_profile else "A Buyer"
+
+        # Explicitly fetch order for listing context
+        order = self.order_repo.get(obj_in.orderId)
+        listing_title = order.listing.title if order and order.listing else "your service"
+
+        await self.notification_service.send_notification(
+            user_id=reviewed_user_id,
+            sender_id=current_user_id,
+            order_id=obj_in.orderId,
+            listing_id=order.listingId if order else None,
+            type=NotificationType.REVIEW_RECEIVED,
+            title="New Review Received",
+            body=f"{reviewer_name} has left a {obj_in.rating}-star review for '{listing_title}'."
+        )
 
         return review
 

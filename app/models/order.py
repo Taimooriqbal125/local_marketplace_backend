@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Optional
 from sqlalchemy import String, Integer, ForeignKey, DateTime, text, CheckConstraint
 from sqlalchemy.dialects.postgresql import UUID
@@ -82,31 +83,31 @@ class Order(Base):
     # ── Timestamps for Lifecycle ─────────────────────────────────────────────
 
     # acceptedAt: when the seller accepts the request
-    acceptedAt: Mapped[Optional[func.now]] = mapped_column(
+    acceptedAt: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), 
         nullable=True
     )
 
     # sellerCompletedAt: when the seller marks the job as done
-    sellerCompletedAt: Mapped[Optional[func.now]] = mapped_column(
+    sellerCompletedAt: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), 
         nullable=True
     )
 
     # buyerCompletedAt: when the buyer confirms receipt/satisfaction
-    buyerCompletedAt: Mapped[Optional[func.now]] = mapped_column(
+    buyerCompletedAt: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), 
         nullable=True
     )
 
     # ── General Timestamps ───────────────────────────────────────────────────
-    createdAt: Mapped[str] = mapped_column(
+    createdAt: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now()
     )
 
-    updatedAt: Mapped[str] = mapped_column(
+    updatedAt: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
@@ -119,3 +120,4 @@ class Order(Base):
     buyer: Mapped["User"] = relationship("User", foreign_keys=[buyerId])
     seller: Mapped["User"] = relationship("User", foreign_keys=[sellerId])
     reviews: Mapped[list["Review"]] = relationship("Review", back_populates="order", cascade="all, delete-orphan")
+    notifications: Mapped[list["Notification"]] = relationship("Notification", back_populates="order", cascade="all, delete-orphan")

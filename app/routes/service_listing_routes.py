@@ -16,6 +16,7 @@ from app.schemas.services_listing import (
     ServiceListingFilterParams,
     ServiceListingListResponse,
     ServiceListingMeListResponse,
+    ServiceListingNearbyFilterParams,
     ServiceListingNearbyListResponse,
     ServiceListingResponse,
     ServiceListingDetailResponse,
@@ -32,7 +33,7 @@ router = APIRouter(
 @router.get("/nearby/me", response_model=ServiceListingNearbyListResponse)
 def get_nearby_listings_from_profile(
     radius_km: float = Query(10.0, ge=0.1, le=100.0, description="Search radius in km"),
-    filters: ServiceListingFilterParams = Depends(),
+    filters: ServiceListingNearbyFilterParams = Depends(),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -46,12 +47,11 @@ def get_nearby_listings_from_profile(
         user_id=current_user.id,
         db=db,
         radius_km=radius_km,
-        category_id=filters.category_id,
+        status=filters.status,
         is_negotiable=filters.is_negotiable,
         price_type=filters.price_type,
-        min_price=filters.min_price,
-        max_price=filters.max_price,
-        search=filters.search,
+        top_selling=filters.top_selling,
+        top_rating=filters.top_rating,
         page=filters.page,
         page_size=filters.page_size,
     )
@@ -62,7 +62,7 @@ def get_nearby_listings(
     latitude: float = Query(..., ge=-90, le=90, description="Your current latitude"),
     longitude: float = Query(..., ge=-180, le=180, description="Your current longitude"),
     radius_km: float = Query(10.0, ge=0.1, le=100.0, description="Search radius in km"),
-    filters: ServiceListingFilterParams = Depends(),
+    filters: ServiceListingNearbyFilterParams = Depends(),
     db: Session = Depends(get_db),
 ):
     """
@@ -74,12 +74,11 @@ def get_nearby_listings(
         latitude=latitude,
         longitude=longitude,
         radius_km=radius_km,
-        category_id=filters.category_id,
+        status=filters.status,
         is_negotiable=filters.is_negotiable,
         price_type=filters.price_type,
-        min_price=filters.min_price,
-        max_price=filters.max_price,
-        search=filters.search,
+        top_selling=filters.top_selling,
+        top_rating=filters.top_rating,
         page=filters.page,
         page_size=filters.page_size,
     )

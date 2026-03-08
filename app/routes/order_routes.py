@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.core import security
 from app.db.session import get_db
 from app.models.user import User
-from app.schemas.order import OrderCreate, OrderResponse, OrderAsSellerResponse, OrderAsBuyerResponse, SellerOrdersResponse, OrderDetailAsBuyerResponse, OrderDetailAsSellerResponse, OrderDetailResponse, OrderUpdate, OrderStatus
+from app.schemas.order import OrderCreate, OrderResponse, OrderAsSellerResponse, OrderAsBuyerResponse, SellerOrdersResponse, OrderDetailResponse, OrderUpdate, OrderStatus
 from app.services.order_service import OrderService
 
 router = APIRouter(
@@ -21,7 +21,7 @@ router = APIRouter(
 
 
 @router.post("/", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
-def create_order(
+async def create_order(
     obj_in: OrderCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(security.get_current_user),
@@ -30,11 +30,11 @@ def create_order(
     Create a new order request for a service listing.
     """
     service = OrderService(db)
-    return service.create_order(obj_in, buyer_id=current_user.id)
+    return await service.create_order(obj_in, buyer_id=current_user.id)
 
 
 @router.get("/me/as-seller", response_model=SellerOrdersResponse)
-def list_my_orders_as_seller(
+async def list_my_orders_as_seller(
     status: Optional[OrderStatus] = Query(None, description="Filter by status"),
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
@@ -43,11 +43,11 @@ def list_my_orders_as_seller(
 ):
     """Retrieve orders where the current user is the seller (incoming requests)."""
     service = OrderService(db)
-    return service.list_seller_orders(user_id=current_user.id, status=status, skip=skip, limit=limit)
+    return await service.list_seller_orders(user_id=current_user.id, status=status, skip=skip, limit=limit)
 
 
 @router.get("/me/as-buyer", response_model=List[OrderAsBuyerResponse])
-def list_my_orders_as_buyer(
+async def list_my_orders_as_buyer(
     status: Optional[OrderStatus] = Query(None, description="Filter by status"),
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
@@ -56,58 +56,22 @@ def list_my_orders_as_buyer(
 ):
     """Retrieve orders where the current user is the buyer (outgoing requests)."""
     service = OrderService(db)
-    return service.list_buyer_orders(user_id=current_user.id, status=status, skip=skip, limit=limit)
+    return await service.list_buyer_orders(user_id=current_user.id, status=status, skip=skip, limit=limit)
 
 
-@router.get("/{order_id}/as-buyer", response_model=OrderDetailAsBuyerResponse)
-def get_order_as_buyer(
+@router.get("/{order_id}", response_model=OrderDetailResponse)
+async def get_order(
     order_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(security.get_current_user),
 ):
-    """Get full order details for the buyer."""
+    """General view for a specific order. Returns full details for involved parties."""
     service = OrderService(db)
-    order = service.get_order(order_id, current_user_id=current_user.id)
-    
-    if order.buyerId != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not the buyer for this order",
-        )
-    return order
-
-
-@router.get("/{order_id}/as-seller", response_model=OrderDetailAsSellerResponse)
-def get_order_as_seller(
-    order_id: uuid.UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(security.get_current_user),
-):
-    """Get full order details for the seller."""
-    service = OrderService(db)
-    order = service.get_order(order_id, current_user_id=current_user.id)
-    
-    if order.sellerId != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not the seller for this order",
-        )
-    return order
-
-
-@router.get("/{order_id}", response_model=OrderResponse)
-def get_order(
-    order_id: uuid.UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(security.get_current_user),
-):
-    """General view for a specific order. Use /as-buyer or /as-seller for role-tailored dashboards."""
-    service = OrderService(db)
-    return service.get_order(order_id, current_user_id=current_user.id)
+    return await service.get_order(order_id, current_user_id=current_user.id)
 
 
 @router.patch("/{order_id}", response_model=OrderDetailResponse)
-def update_order_status(
+async def update_order_status(
     order_id: uuid.UUID,
     obj_in: OrderUpdate,
     db: Session = Depends(get_db),
@@ -118,4 +82,4 @@ def update_order_status(
     The service layer handles role-based authorization.
     """
     service = OrderService(db)
-    return service.update_order_status(order_id, obj_in, current_user_id=current_user.id)
+    return await service.update_order_status(order_id, obj_in, current_user_id=current_user.id)

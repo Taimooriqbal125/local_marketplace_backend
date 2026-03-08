@@ -170,3 +170,9 @@ class ServiceListing(Base):
         back_populates="listing",
         cascade="all, delete-orphan"
     )
+
+    notifications: Mapped[list["Notification"]] = relationship(
+        "Notification",
+        back_populates="listing",
+        cascade="all, delete-orphan"
+    )

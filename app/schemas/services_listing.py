@@ -385,6 +385,55 @@ class ServiceListingFilterParams:
         self.page_size = page_size
 
 
+class ServiceListingNearbyFilterParams:
+    """
+    Specialized query filters for nearby search routes.
+    Includes only the fields requested by the user for a cleaner API.
+    """
+
+    def __init__(
+        self,
+        is_negotiable: Annotated[
+            Optional[bool],
+            Query(alias="isNegotiable", description="Filter by negotiability"),
+        ] = None,
+        status: Annotated[
+            Optional[ListingStatus],
+            Query(description="Filter by listing status (default: active)"),
+        ] = "active",
+        top_selling: Annotated[
+            bool,
+            Query(alias="topSelling", description="Sort by top selling sellers"),
+        ] = False,
+        top_rating: Annotated[
+            bool,
+            Query(alias="topRating", description="Sort by top rated sellers"),
+        ] = False,
+        price_type: Annotated[
+            Optional[PriceType],
+            Query(
+                alias="priceType",
+                description="Price model: fixed | hourly | daily | negotiable",
+            ),
+        ] = None,
+        page: Annotated[
+            int,
+            Query(ge=1, description="Page number (1-based)"),
+        ] = 1,
+        page_size: Annotated[
+            int,
+            Query(alias="pageSize", ge=1, le=100, description="Results per page"),
+        ] = 20,
+    ) -> None:
+        self.is_negotiable = is_negotiable
+        self.status = status
+        self.top_selling = top_selling
+        self.top_rating = top_rating
+        self.price_type = price_type
+        self.page = page
+        self.page_size = page_size
+
+
 # ---------------------------------------------------------------------------
 # Nearby search query params schema (kept for internal use / documentation)
 # ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ Creates all tables defined in our models.
 
 from sqlalchemy import text
 from app.db.session import engine
-from app.models import User, Post, Review, Base  # Import everything so Base knows all tables
+from app.models import User, Review, Base  # Import everything so Base knows all tables
 
 
 def init_db() -> None:

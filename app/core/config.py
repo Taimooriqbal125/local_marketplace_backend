@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     CLOUDINARY_API_SECRET: str = Field(..., description="Cloudinary API secret")
     CLOUDINARY_FOLDER: str = Field(default="marketplace", description="Upload folder")
 
+    # Notifications - Add these for notification retention
+    DELETE_READ_NOTIFICATIONS_IN_DAYS: int = Field(..., description="Days to keep read notifications")
+    DELETE_UNREAD_NOTIFICATIONS_IN_DAYS: int = Field(..., description="Days to keep unread notifications")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

@@ -2,12 +2,12 @@
 Repositories Package.
 """
 
-from . import user_repo
-from . import post_repo
-from . import profile_repo
-from . import category_repo
-from . import cities_repo
-from . import service_listing_repo
+from .user_repo import UserRepository
+from .profile_repo import ProfileRepository
+from .category_repo import CategoryRepository
+from .cities_repo import CityRepository
+from .service_listing_repo import ServiceListingRepository
 from .listing_media import ListingMediaRepository
 from .order_repo import OrderRepository
 from .review_repo import ReviewRepository
+from .notification_repo import NotificationRepository

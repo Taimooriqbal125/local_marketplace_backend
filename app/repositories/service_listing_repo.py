@@ -191,12 +191,15 @@ class ServiceListingRepository:
         latitude: float,
         longitude: float,
         radius_km: float,
+        status: Optional[str] = "active",
         category_id: Optional[int] = None,
         is_negotiable: Optional[bool] = None,
         price_type: Optional[str] = None,
         min_price: Optional[Decimal] = None,
         max_price: Optional[Decimal] = None,
         search: Optional[str] = None,
+        top_selling: bool = False,
+        top_rating: bool = False,
         skip: int = 0,
         limit: int = 20,
     ) -> tuple[list[tuple[ServiceListing, float]], int]:
@@ -209,6 +212,7 @@ class ServiceListingRepository:
 
         Returns: list of (ServiceListing, distance_km) tuples, sorted closest first.
         """
+        from app.models.profile import Profile
         customer_point = _to_wkt(latitude, longitude)
 
         # Distance in meters from customer to service location point
@@ -217,27 +221,30 @@ class ServiceListingRepository:
             customer_point,
         )
 
-        query = (
-            self.db.query(
-                ServiceListing,
-                # Cast ST_Distance (double precision) → Numeric, then divide by 1000 for km
-                func.round(
-                    func.cast(distance_m, sa.Numeric(12, 4)) / 1000, 2
-                ).label("distance_km"),
-            )
-            .filter(
-                # Only active listings
-                ServiceListing.status == "active",
-                # Only listings that HAVE a location point set
-                ServiceListing.service_location.isnot(None),
-                # ✅ Check if the service is within the USER'S requested search radius
-                ST_DWithin(
-                    ServiceListing.service_location,
-                    customer_point,
-                    radius_km * 1000,  # km → meters (using argument radius_km)
-                ),
-            )
+        query = self.db.query(
+            ServiceListing,
+            # Cast ST_Distance (double precision) → Numeric, then divide by 1000 for km
+            func.round(
+                func.cast(distance_m, sa.Numeric(12, 4)) / 1000, 2
+            ).label("distance_km"),
         )
+
+        if top_selling or top_rating:
+            query = query.join(Profile, ServiceListing.sellerId == Profile.userId)
+
+        query = query.filter(
+            # Only listings that HAVE a location point set
+            ServiceListing.service_location.isnot(None),
+            # ✅ Check if the service is within the USER'S requested search radius
+            ST_DWithin(
+                ServiceListing.service_location,
+                customer_point,
+                radius_km * 1000,  # km → meters (using argument radius_km)
+            ),
+        )
+
+        if status is not None:
+            query = query.filter(ServiceListing.status == status)
 
         if category_id is not None:
             query = query.filter(ServiceListing.categoryId == category_id)
@@ -265,12 +272,16 @@ class ServiceListingRepository:
             )
 
         total = query.count()
-        results = (
-            query.order_by("distance_km")  # closest first
-            .offset(skip)
-            .limit(limit)
-            .all()
-        )
+
+        # Sorting logic
+        if top_selling:
+            query = query.order_by(Profile.sellerCompletedOrdersCount.desc())
+        elif top_rating:
+            query = query.order_by(Profile.sellerRatingAvg.desc(), Profile.sellerRatingCount.desc())
+        else:
+            query = query.order_by("distance_km")  # default: closest first
+
+        results = query.offset(skip).limit(limit).all()
         return results, total
 
     # ── Write Operations ─────────────────────────────────────────────────────

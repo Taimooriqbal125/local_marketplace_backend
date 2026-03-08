@@ -25,7 +25,7 @@ from app.schemas.profile import (
     ProfilePublicResponse,
     PublicProfileDetailResponse
 )
-from app.services import profile_service
+from app.services import ProfileService
 from app.core.security import get_current_user
 from app.models.user import User
 
@@ -57,7 +57,8 @@ async def create_profile(
 
     # Automatically use the ID of the authenticated user
     profile_obj.userId = current_user.id
-    return await profile_service.create_profile(db, profile_obj, photoUrl)
+    service = ProfileService(db)
+    return await service.create_profile(profile_obj, photoUrl)
 
 
 @router.get("/me", response_model=PrivateProfileResponse)
@@ -79,7 +80,8 @@ async def update_my_location(
     Optimized for high-frequency updates.
     """
     update_data = ProfileUpdate(last_location_point=location)
-    return await profile_service.update_profile(db, current_user.id, update_data)
+    service = ProfileService(db)
+    return await service.update_profile(current_user.id, update_data)
 
 
 @router.get("/", response_model=List[ProfilePublicResponse])
@@ -103,8 +105,8 @@ def get_all_profiles(
             detail="Only administrators can access the full profile listing."
         )
 
-    return profile_service.get_all_profiles(
-        db,
+    service = ProfileService(db)
+    return service.get_all_profiles(
         skip=skip,
         limit=limit,
         is_banned=is_banned,
@@ -117,7 +119,8 @@ def get_all_profiles(
 @router.get("/{user_id}", response_model=PublicProfileDetailResponse)
 def get_profile(user_id: UUID, db: Session = Depends(get_db)):
     """Retrieve a single profile by user ID (Public)."""
-    return profile_service.get_profile(db, user_id)
+    service = ProfileService(db)
+    return service.get_profile(user_id)
 
 
 @router.patch("/{user_id}", response_model=ProfileResponse)
@@ -148,7 +151,8 @@ async def update_profile(
             detail=f"Invalid profile_data JSON format: {str(e)}"
         )
 
-    return await profile_service.update_profile(db, user_id, update_obj, photoUrl, background_tasks)
+    service = ProfileService(db)
+    return await service.update_profile(user_id, update_obj, photoUrl, background_tasks)
 
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -162,9 +166,12 @@ async def delete_profile(
     Permanently delete a profile.
     Only the owner or an admin can delete.
     """
+    # Only the owner or an admin can delete
     if user_id != current_user.id and not current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Cannot delete another user's profile"
         )
-    await profile_service.delete_profile(db, user_id, background_tasks)
+    
+    service = ProfileService(db)
+    await service.delete_profile(user_id, background_tasks)

@@ -22,7 +22,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
     is_admin: Optional[bool] = Field(default=False, alias="isAdmin")
-    phone_number: Optional[str] = None
+    phone: Optional[str] = None
 
     class Config:
         populate_by_name = True  # allows both is_admin and isAdmin
@@ -34,7 +34,7 @@ class UserUpdate(BaseModel):
     password: Optional[str] = None
     is_admin: Optional[bool] = None
     is_active: Optional[bool] = None
-    phone_number: Optional[str] = None
+    phone: Optional[str] = None
 
 
 # ---------- Response Schemas (what the API sends back) ----------
@@ -48,7 +48,7 @@ class UserResponse(BaseModel):
     email: str
     is_active: bool
     is_admin: bool
-    phone_number: Optional[str] = Field(default=None, validation_alias="phone")
+    phone: Optional[str] = Field(default=None, validation_alias="phone")
     created_at: datetime
     updated_at: datetime
 

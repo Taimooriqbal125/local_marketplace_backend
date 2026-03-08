@@ -18,7 +18,7 @@ router = APIRouter(prefix="/reviews", tags=["Reviews"])
 
 
 @router.post("/", response_model=ReviewCreateResponse, status_code=status.HTTP_201_CREATED)
-def create_review(
+async def create_review(
     obj_in: ReviewCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -32,7 +32,7 @@ def create_review(
     - User cannot review the same order twice.
     """
     service = ReviewService(db)
-    return service.create_review(obj_in, current_user.id)
+    return await service.create_review(obj_in, current_user.id)
 
 
 @router.get("/me/received", response_model=List[ReviewReceivedResponse])
