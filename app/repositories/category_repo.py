@@ -1,3 +1,4 @@
+import uuid
 from sqlalchemy.orm import Session
 from app.models.category import Category
 from app.schemas.category import CategoryCreate, CategoryUpdate
@@ -6,7 +7,7 @@ class CategoryRepository:
     def __init__(self, db: Session):
         self.db = db
 
-    def get(self, category_id: int) -> Category | None:
+    def get(self, category_id: uuid.UUID) -> Category | None:
         return self.db.query(Category).filter(Category.id == category_id).first()
 
     def get_by_slug(self, slug: str) -> Category | None:
@@ -34,8 +35,8 @@ class CategoryRepository:
         self.db.delete(db_obj)
         self.db.commit()
 
-    def get_children(self, parent_id: int) -> list[Category]:
+    def get_children(self, parent_id: uuid.UUID) -> list[Category]:
         return self.db.query(Category).filter(Category.parent_id == parent_id).all()
 
-    def get_tree(self, parent_id: int | None = None) -> list[Category]:
+    def get_tree(self, parent_id: uuid.UUID | None = None) -> list[Category]:
         return self.db.query(Category).filter(Category.parent_id == parent_id).all()

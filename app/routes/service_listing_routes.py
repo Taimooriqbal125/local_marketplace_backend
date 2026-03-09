@@ -50,6 +50,7 @@ def get_nearby_listings_from_profile(
         status=filters.status,
         is_negotiable=filters.is_negotiable,
         price_type=filters.price_type,
+        category_id=filters.category_id,
         top_selling=filters.top_selling,
         top_rating=filters.top_rating,
         page=filters.page,
@@ -77,6 +78,7 @@ def get_nearby_listings(
         status=filters.status,
         is_negotiable=filters.is_negotiable,
         price_type=filters.price_type,
+        category_id=filters.category_id,
         top_selling=filters.top_selling,
         top_rating=filters.top_rating,
         page=filters.page,
@@ -86,17 +88,6 @@ def get_nearby_listings(
 
 @router.get("/", response_model=ServiceListingListResponse)
 def list_listings(
-    listing_status: Optional[str] = Query(
-        "active",
-        alias="status",
-        description="Filter by status (default: active)",
-    ),
-    city_id: Optional[uuid.UUID] = Query(
-        None, alias="cityId", description="Filter by city ID"
-    ),
-    seller_id: Optional[uuid.UUID] = Query(
-        None, alias="sellerId", description="Filter by seller ID"
-    ),
     filters: ServiceListingFilterParams = Depends(),
     db: Session = Depends(get_db),
 ):
@@ -109,15 +100,17 @@ def list_listings(
     - `?priceType=fixed` — only fixed-price listings
     - `?minPrice=10&maxPrice=100` — price range
     - `?search=plumbing` — keyword in title or description
-    - `?categoryId=3` — specific category
-    - `?status=paused` — listings by status
+    - `?categoryId=UUID` — specific category
+    - `?status=pasused` — listings by status
+    - `?topSelling=true` — sort by top selling sellers
+    - `?topRating=true` — sort by top rated sellers
     """
     service = ServiceListingService(db)
     return service.list_listings(
-        status=listing_status,
+        status=filters.status,
         category_id=filters.category_id,
-        city_id=city_id,
-        seller_id=seller_id,
+        city_id=filters.city_id,
+        seller_id=filters.seller_id,
         is_negotiable=filters.is_negotiable,
         price_type=filters.price_type,
         min_price=filters.min_price,
@@ -134,18 +127,13 @@ def list_listings(
 
 @router.get("/me", response_model=ServiceListingMeListResponse)
 def list_my_listings(
-    listing_status: Optional[str] = Query(
-        None,
-        alias="status",
-        description="Filter by status. Omit to see all (drafts, active, paused, etc.)",
-    ),
     filters: ServiceListingFilterParams = Depends(),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
     Retrieve listings belonging to the authenticated user.
-    Includes all statuses by default (drafts, active, paused, closed).
+    Includes 'active' listings by default. Use `?status=` to filter.
 
     **Filter examples**
     - `?status=active` — only your active listings
@@ -154,9 +142,12 @@ def list_my_listings(
     - `?search=logo` — keyword search in your listings
     """
     service = ServiceListingService(db)
+    # For /me, if status is not explicitly provided, we might want to default to None (all) 
+    # instead of "active" if defined that way in the schema.
+    # But filters.status defaults to "active" currently.
     return service.list_my_listings(
         seller_id=current_user.id,
-        status=listing_status,
+        status=filters.status,
         category_id=filters.category_id,
         is_negotiable=filters.is_negotiable,
         price_type=filters.price_type,
@@ -235,5 +226,3 @@ def delete_listing(
         is_admin=current_user.is_admin
     )
     return {"message": "Service listing deleted successfully."}
-
-

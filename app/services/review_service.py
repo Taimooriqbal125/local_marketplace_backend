@@ -3,6 +3,7 @@ Review Service — encapsulates business logic for the Review resource.
 """
 
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import HTTPException, status
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.repositories.review_repo import ReviewRepository
 from app.repositories.order_repo import OrderRepository
+from app.repositories.profile_repo import ProfileRepository
 from app.schemas.review import ReviewCreate
 from app.models.review import Review
 from app.services.notification_service import NotificationService
@@ -23,6 +25,7 @@ class ReviewService:
         self.db = db
         self.repo = ReviewRepository(db)
         self.order_repo = OrderRepository(db)
+        self.profile_repo = ProfileRepository(db)
         self.notification_service = NotificationService(db)
 
     async def create_review(self, obj_in: ReviewCreate, current_user_id: uuid.UUID) -> Review:
@@ -80,10 +83,10 @@ class ReviewService:
         )
 
         # 6. Update Seller Reputation in Profile
-        update_seller_rating(self.db, reviewed_user_id, obj_in.rating)
+        self.profile_repo.update_seller_rating(reviewed_user_id, obj_in.rating)
 
         # 7. Trigger Notification for Seller
-        reviewer_profile = get_profile_by_user_id(self.db, current_user_id)
+        reviewer_profile = self.profile_repo.get_by_user_id(current_user_id)
         reviewer_name = reviewer_profile.name if reviewer_profile else "A Buyer"
 
         # Explicitly fetch order for listing context
@@ -139,3 +142,18 @@ class ReviewService:
             )
             
         self.repo.delete(review)
+
+    def list_all_reviews(
+        self,
+        days: Optional[int] = None,
+        skip: int = 0,
+        limit: int = 100
+    ) -> List[Review]:
+        """
+        Fetch all reviews for admin listing with optional date range.
+        """
+        start_date = None
+        if days:
+            start_date = datetime.now(timezone.utc) - timedelta(days=days)
+
+        return self.repo.get_all_filtered(start_date=start_date, skip=skip, limit=limit)

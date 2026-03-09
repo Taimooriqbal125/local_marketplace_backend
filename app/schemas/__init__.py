@@ -13,5 +13,5 @@ from .services_listing import (
     ServiceListingListResponse,
 )
 from .order import OrderCreate, OrderUpdate, OrderResponse
-from .review import ReviewCreate, ReviewResponse
+from .review import ReviewCreate, ReviewResponse, AdminReviewResponse
 from .notification import NotificationCreate, NotificationUpdate, NotificationResponse

@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 # ---------------------------------------------------------------------------
 # Allowed literals
 # ---------------------------------------------------------------------------
-PriceType = Literal["fixed", "hourly", "daily", "negotiable"]
+PriceType = Literal["fixed", "hourly", "daily"]
 ListingStatus = Literal["draft", "active", "paused", "closed", "banned"]
 
 
@@ -59,7 +59,7 @@ class ServiceListingBase(BaseModel):
 
     model_config = dict(populate_by_name=True)
 
-    categoryId: int = Field(..., gt=0)
+    categoryId: UUID = Field(...)
     cityId: Optional[UUID] = None
     status: ListingStatus = Field(default="draft")
 
@@ -89,10 +89,10 @@ class ServiceListingBase(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def price_amount_required_for_fixed(self) -> "ServiceListingBase":
-        if self.priceType != "negotiable" and self.priceAmount is None:
+    def price_amount_required(self) -> "ServiceListingBase":
+        if self.priceAmount is None:
             raise ValueError(
-                f"priceAmount is required when priceType is '{self.priceType}'"
+                f"priceAmount is required for price type '{self.priceType}'"
             )
         return self
 
@@ -130,7 +130,7 @@ class ServiceListingUpdate(BaseModel):
     # ✅ Optional location update
     service_location_point: Optional[ServiceLocationPoint] = None
 
-    categoryId: Optional[int] = Field(default=None, gt=0)
+    categoryId: Optional[UUID] = Field(default=None)
     cityId: Optional[UUID] = None
     status: Optional[ListingStatus] = None
 
@@ -150,6 +150,17 @@ class ServiceListingUpdate(BaseModel):
         if v is None:
             return v
         return v.strip() or None
+
+    @field_validator("priceAmount")
+    @classmethod
+    def price_amount_not_none(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+        if v is None:
+            return v  # Allow not providing it in PATCH
+        # But if it IS provided, it must be a valid Decimal (ge=0 is already in Field)
+        # Pydantic handles the type check. If they send null, v will be None.
+        # Actually, in PATCH, if they send "priceAmount": null, v is None.
+        # We want to prevent clearing it.
+        return v
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +200,7 @@ class ServiceListingCore(BaseModel):
 
 class ServiceListingBaseResponse(ServiceListingCore):
     """Internal base for full views (includes metadata and radius)."""
-    categoryId: int
+    categoryId: UUID
     serviceRadiusKm: float
     status: ListingStatus
     createdAt: datetime
@@ -316,7 +327,7 @@ class ServiceListingFilterParams:
             Optional[PriceType],
             Query(
                 alias="priceType",
-                description="Price model: fixed | hourly | daily | negotiable",
+                description="Price model: fixed | hourly | daily",
             ),
         ] = None,
         min_price: Annotated[
@@ -324,7 +335,7 @@ class ServiceListingFilterParams:
             Query(
                 alias="minPrice",
                 ge=0,
-                description="Minimum price amount (inclusive). Skipped for negotiable listings.",
+                description="Minimum price amount (inclusive)",
             ),
         ] = None,
         max_price: Annotated[
@@ -332,7 +343,7 @@ class ServiceListingFilterParams:
             Query(
                 alias="maxPrice",
                 ge=0,
-                description="Maximum price amount (inclusive). Skipped for negotiable listings.",
+                description="Maximum price amount (inclusive)",
             ),
         ] = None,
         search: Annotated[
@@ -343,8 +354,8 @@ class ServiceListingFilterParams:
             ),
         ] = None,
         category_id: Annotated[
-            Optional[int],
-            Query(alias="categoryId", gt=0, description="Filter by category ID"),
+            Optional[UUID],
+            Query(alias="categoryId", description="Filter by category ID"),
         ] = None,
         city_slug: Annotated[
             Optional[str],
@@ -370,6 +381,18 @@ class ServiceListingFilterParams:
             int,
             Query(alias="pageSize", ge=1, le=100, description="Results per page"),
         ] = 20,
+        status: Annotated[
+            Optional[ListingStatus],
+            Query(description="Filter by listing status (default: active)"),
+        ] = "active",
+        city_id: Annotated[
+            Optional[UUID],
+            Query(alias="cityId", description="Filter by city ID"),
+        ] = None,
+        seller_id: Annotated[
+            Optional[UUID],
+            Query(alias="sellerId", description="Filter by seller ID"),
+        ] = None,
     ) -> None:
         self.is_negotiable = is_negotiable
         self.price_type = price_type
@@ -383,6 +406,9 @@ class ServiceListingFilterParams:
         self.top_rating = top_rating
         self.page = page
         self.page_size = page_size
+        self.status = status
+        self.city_id = city_id
+        self.seller_id = seller_id
 
 
 class ServiceListingNearbyFilterParams:
@@ -413,7 +439,7 @@ class ServiceListingNearbyFilterParams:
             Optional[PriceType],
             Query(
                 alias="priceType",
-                description="Price model: fixed | hourly | daily | negotiable",
+                description="Price model: fixed | hourly | daily",
             ),
         ] = None,
         page: Annotated[
@@ -424,6 +450,10 @@ class ServiceListingNearbyFilterParams:
             int,
             Query(alias="pageSize", ge=1, le=100, description="Results per page"),
         ] = 20,
+        category_id: Annotated[
+            Optional[UUID],
+            Query(alias="categoryId", description="Filter by category ID"),
+        ] = None,
     ) -> None:
         self.is_negotiable = is_negotiable
         self.status = status
@@ -432,6 +462,7 @@ class ServiceListingNearbyFilterParams:
         self.price_type = price_type
         self.page = page
         self.page_size = page_size
+        self.category_id = category_id
 
 
 # ---------------------------------------------------------------------------
@@ -442,7 +473,7 @@ class NearbySearchParams(BaseModel):
     latitude: float = Field(..., ge=-90, le=90)
     longitude: float = Field(..., ge=-180, le=180)
     radius_km: float = Field(default=10.0, ge=0.1, le=100.0)
-    category_id: Optional[int] = None
+    category_id: Optional[UUID] = None
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)
 

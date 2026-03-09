@@ -173,8 +173,11 @@ class ProfilePublicResponse(BaseModel):
     id: UUID
     userName: str
     image: Optional[str] = None
-    status: str
     email: str
+    phone: Optional[str] = None
+    sellerRatingAvg: Decimal = Decimal("0.00")
+    isBanned: bool = False
+    sellerCompletedOrdersCount: int
 
     @model_validator(mode="before")
     @classmethod
@@ -188,8 +191,11 @@ class ProfilePublicResponse(BaseModel):
             "id": data.userId,
             "userName": data.name,
             "image": data.photoUrl,
-            "status": data.sellerStatus,
             "email": data.user.email if (hasattr(data, "user") and data.user) else "Unknown",
+            "phone": data.user.phone if (hasattr(data, "user") and data.user) else None,
+            "sellerRatingAvg": data.sellerRatingAvg,
+            "isBanned": data.isBanned,
+            "sellerCompletedOrdersCount": data.sellerCompletedOrdersCount,
         }
 
     class Config:

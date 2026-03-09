@@ -76,7 +76,7 @@ class ServiceListingRepository:
         )
 
     def get_by_category(
-        self, category_id: int, skip: int = 0, limit: int = 20
+        self, category_id: uuid.UUID, skip: int = 0, limit: int = 20
     ) -> list[ServiceListing]:
         return (
             self.db.query(ServiceListing)
@@ -109,7 +109,7 @@ class ServiceListingRepository:
         self,
         *,
         status: Optional[str] = None,
-        category_id: Optional[int] = None,
+        category_id: Optional[uuid.UUID] = None,
         city_id: Optional[uuid.UUID] = None,
         seller_id: Optional[uuid.UUID] = None,
         is_negotiable: Optional[bool] = None,
@@ -192,7 +192,7 @@ class ServiceListingRepository:
         longitude: float,
         radius_km: float,
         status: Optional[str] = "active",
-        category_id: Optional[int] = None,
+        category_id: Optional[uuid.UUID] = None,
         is_negotiable: Optional[bool] = None,
         price_type: Optional[str] = None,
         min_price: Optional[Decimal] = None,

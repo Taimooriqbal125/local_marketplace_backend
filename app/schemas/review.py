@@ -1,7 +1,7 @@
 """Pydantic schemas for Review resource."""
 
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
@@ -211,6 +211,62 @@ class ReviewGivenResponse(BaseModel):
             "serviceName": service_name,
             "categoryName": category_name,
             "imageUrl": service_image,
+        }
+
+    class Config:
+        from_attributes = True
+
+class AdminReviewResponse(BaseModel):
+    """
+    Comprehensive review response for admin dashboard.
+    Includes reviewer, seller, and service context.
+    """
+
+    id: UUID
+    rating: int
+    comment: Optional[str] = None
+    createdAt: datetime
+    
+    # Enriched context
+    reviewerName: str
+    sellerName: str
+    serviceName: str
+    serviceImages: List[str] = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_relationships(cls, data: any) -> any:
+        """Map fields from reviewer, reviewed_user, and order.listing relations."""
+        if isinstance(data, dict):
+            return data
+
+        # Reviewer info
+        reviewer_name = "Anonymous"
+        if data.reviewer and data.reviewer.profile:
+            reviewer_name = data.reviewer.profile.name or "User"
+        
+        # Seller info
+        seller_name = "Unknown Seller"
+        if data.reviewed_user and data.reviewed_user.profile:
+            seller_name = data.reviewed_user.profile.name or "Seller"
+
+        # Service info
+        service_name = "Unknown Service"
+        service_images = []
+        if data.order and data.order.listing:
+            service_name = data.order.listing.title
+            if data.order.listing.media:
+                service_images = [m.imageUrl for m in data.order.listing.media]
+
+        return {
+            "id": data.id,
+            "rating": data.rating,
+            "comment": data.comment,
+            "createdAt": data.createdAt,
+            "reviewerName": reviewer_name,
+            "sellerName": seller_name,
+            "serviceName": service_name,
+            "serviceImages": service_images,
         }
 
     class Config:

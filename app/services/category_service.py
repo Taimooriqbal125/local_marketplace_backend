@@ -1,3 +1,4 @@
+import uuid
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException, status
@@ -10,7 +11,7 @@ class CategoryService:
     def __init__(self, db: Session):
         self.repo = CategoryRepository(db)
 
-    def get_category(self, category_id: int) -> CategoryOut | None:
+    def get_category(self, category_id: uuid.UUID) -> CategoryOut | None:
         category = self.repo.get(category_id)
         if category:
             return CategoryOut.model_validate(category)
@@ -42,19 +43,28 @@ class CategoryService:
             )
         return CategoryOut.model_validate(category)
 
-    def update_category(self, category_id: int, obj_in: CategoryUpdate) -> CategoryOut | None:
+    def update_category(self, category_id: uuid.UUID, obj_in: CategoryUpdate) -> CategoryOut | None:
         category = self.repo.get(category_id)
         if not category:
             return None
         updated = self.repo.update(category, obj_in)
         return CategoryOut.model_validate(updated)
 
-    def delete_category(self, category_id: int) -> bool:
+    def delete_category(self, category_id: uuid.UUID) -> bool:
         category = self.repo.get(category_id)
         if not category:
             return False
         self.repo.delete(category)
         return True
+
+    def get_category_admin(self, category_id: uuid.UUID) -> CategoryTreeOut | None:
+        """
+        Admin-only: Fetch category details with immediate children.
+        """
+        category = self.repo.get(category_id)
+        if category:
+            return CategoryTreeOut.model_validate(category)
+        return None
 
     def get_category_tree(self, parent_id: int | None = None) -> list[CategoryTreeOut]:
         def build_tree(parent_id):

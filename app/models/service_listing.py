@@ -53,7 +53,8 @@ class ServiceListing(Base):
     )
 
     # categoryId → categories.id  (required)
-    categoryId: Mapped[int] = mapped_column(
+    categoryId: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
         ForeignKey("categories.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,

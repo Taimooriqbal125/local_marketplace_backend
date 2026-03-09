@@ -18,6 +18,7 @@ from typing import Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from app.repositories.service_listing_repo import ServiceListingRepository
+from app.repositories.profile_repo import ProfileRepository
 from geoalchemy2.shape import to_shape
 from app.schemas.services_listing import (
     ServiceListingCreate,
@@ -90,7 +91,7 @@ class ServiceListingService:
         self,
         *,
         status: Optional[str] = "active",
-        category_id: Optional[int] = None,
+        category_id: Optional[uuid.UUID] = None,
         city_id: Optional[uuid.UUID] = None,
         seller_id: Optional[uuid.UUID] = None,
         is_negotiable: Optional[bool] = None,
@@ -138,7 +139,7 @@ class ServiceListingService:
         self,
         seller_id: uuid.UUID,
         status: Optional[str] = None,
-        category_id: Optional[int] = None,
+        category_id: Optional[uuid.UUID] = None,
         is_negotiable: Optional[bool] = None,
         price_type: Optional[str] = None,
         min_price: Optional[Decimal] = None,
@@ -307,7 +308,7 @@ class ServiceListingService:
         longitude: float,
         radius_km: float = 10.0,
         status: Optional[str] = "active",
-        category_id: Optional[int] = None,
+        category_id: Optional[uuid.UUID] = None,
         is_negotiable: Optional[bool] = None,
         price_type: Optional[str] = None,
         min_price: Optional[Decimal] = None,
@@ -365,7 +366,7 @@ class ServiceListingService:
         db: Session,
         radius_km: float = 10.0,
         status: Optional[str] = "active",
-        category_id: Optional[int] = None,
+        category_id: Optional[uuid.UUID] = None,
         is_negotiable: Optional[bool] = None,
         price_type: Optional[str] = None,
         min_price: Optional[Decimal] = None,
@@ -381,7 +382,7 @@ class ServiceListingService:
         profile.last_location_point automatically.
         Raises 404 if profile not found, 400 if location not set.
         """
-        profile = get_profile_by_user_id(db, user_id)
+        profile = ProfileRepository(db).get_by_user_id(user_id)
         if not profile:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,

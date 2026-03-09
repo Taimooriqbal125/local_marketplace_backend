@@ -3,9 +3,14 @@ Review Repository — handles database operations for the Review model.
 """
 
 import uuid
+from datetime import datetime
 from typing import List, Optional
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+
 from app.models.review import Review
+from app.models.user import User
+from app.models.order import Order
+from app.models.service_listing import ServiceListing
 from app.schemas.review import ReviewCreate
 
 
@@ -27,11 +32,6 @@ class ReviewRepository:
         self, user_id: uuid.UUID, rating: Optional[int] = None, skip: int = 0, limit: int = 20
     ) -> List[Review]:
         """Return reviews received by a user, newest first. Includes joined relations."""
-        from sqlalchemy.orm import joinedload
-        from app.models.user import User
-        from app.models.order import Order
-        from app.models.service_listing import ServiceListing
-
         query = (
             self.db.query(Review)
             .options(
@@ -56,10 +56,6 @@ class ReviewRepository:
         self, user_id: uuid.UUID, skip: int = 0, limit: int = 20
     ) -> List[Review]:
         """Return reviews written by a user, newest first. Includes service context."""
-        from sqlalchemy.orm import joinedload
-        from app.models.order import Order
-        from app.models.service_listing import ServiceListing
-
         return (
             self.db.query(Review)
             .options(
@@ -77,11 +73,6 @@ class ReviewRepository:
         self, listing_id: uuid.UUID, skip: int = 0, limit: int = 20
     ) -> List[Review]:
         """Return all reviews for a specific service listing, newest first."""
-        from sqlalchemy.orm import joinedload
-        from app.models.user import User
-        from app.models.order import Order
-        from app.models.service_listing import ServiceListing
-
         return (
             self.db.query(Review)
             .join(Order, Review.orderId == Order.id)
@@ -97,13 +88,36 @@ class ReviewRepository:
             .all()
         )
 
+    def get_all_filtered(
+        self,
+        start_date: Optional[datetime] = None,
+        skip: int = 0,
+        limit: int = 100
+    ) -> List[Review]:
+        """
+        Fetch all reviews with filters (Admin only context).
+        Joins all related models for a comprehensive response.
+        """
+        query = self.db.query(Review).options(
+            joinedload(Review.reviewer).joinedload(User.profile),
+            joinedload(Review.reviewed_user).joinedload(User.profile),
+            joinedload(Review.order).joinedload(Order.listing).joinedload(ServiceListing.media),
+        )
+
+        if start_date:
+            query = query.filter(Review.createdAt >= start_date)
+
+        return (
+            query.order_by(Review.createdAt.desc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+
     def create(
         self, obj_in: ReviewCreate, reviewer_id: uuid.UUID, reviewed_user_id: uuid.UUID
     ) -> Review:
         """Create a new review in the database."""
-        from sqlalchemy.orm import joinedload
-        from app.models.user import User
-
         db_obj = Review(
             orderId=obj_in.orderId,
             reviewerId=reviewer_id,

@@ -35,7 +35,6 @@ router = APIRouter(
 )
 
 
-@router.post("", response_model=ProfileResponse, status_code=status.HTTP_201_CREATED)
 @router.post("/", response_model=ProfileResponse, status_code=status.HTTP_201_CREATED, include_in_schema=False)
 async def create_profile(
     profile_data: Annotated[str, Form(description="JSON string of profile data")],

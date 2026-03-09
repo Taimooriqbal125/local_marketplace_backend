@@ -33,18 +33,35 @@ class CityService:
 		return [CityOut.model_validate(city) for city in cities]
 
 	def create_city(self, obj_in: CityCreate) -> CityOut:
-		# Pre-check: slug must be unique
+		# 1. Pre-check: slug must be unique
 		if self.repo.get_by_slug(obj_in.slug):
 			raise HTTPException(
 				status_code=status.HTTP_409_CONFLICT,
 				detail=f"A city with slug '{obj_in.slug}' already exists.",
 			)
-		try:
-			city = self.repo.create(obj_in)
-		except IntegrityError:
+		
+		# 2. Pre-check: name + country combination should be unique (logical check)
+		if self.repo.get_by_name_and_country(obj_in.name, obj_in.country):
 			raise HTTPException(
 				status_code=status.HTTP_409_CONFLICT,
-				detail="A city with this slug or name already exists.",
+				detail=f"City '{obj_in.name}' already exists in '{obj_in.country}'.",
+			)
+
+		try:
+			city = self.repo.create(obj_in)
+		except IntegrityError as e:
+			# Differentiate between NotNull (missing slug) and Unique (duplicate)
+			err_msg = str(e.orig).lower()
+			if "slug" in err_msg:
+				detail = f"A city with slug '{obj_in.slug}' already exists."
+			elif "name" in err_msg:
+				detail = f"City '{obj_in.name}' already exists."
+			else:
+				detail = "Database integrity error: A city with this slug or name already exists."
+				
+			raise HTTPException(
+				status_code=status.HTTP_409_CONFLICT,
+				detail=detail,
 			)
 		return CityOut.model_validate(city)
 

@@ -13,6 +13,9 @@ class CityRepository:
 	def get_by_slug(self, slug: str) -> City | None:
 		return self.db.query(City).filter(City.slug == slug).first()
 
+	def get_by_name_and_country(self, name: str, country: str) -> City | None:
+		return self.db.query(City).filter(City.name == name, City.country == country).first()
+
 	def get_all(self, skip: int = 0, limit: int = 100) -> list[City]:
 		return self.db.query(City).offset(skip).limit(limit).all()
 

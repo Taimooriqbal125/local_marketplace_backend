@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.repositories.order_repo import OrderRepository
 from app.repositories.service_listing_repo import ServiceListingRepository
+from app.repositories.profile_repo import ProfileRepository
 from app.schemas.order import OrderCreate, OrderUpdate
 from app.services.notification_service import NotificationService
 from app.models.notification import NotificationType
@@ -26,7 +27,7 @@ class OrderService:
 
     def _get_user_details(self, user_id: uuid.UUID):
         """Helper to fetch name, email and phone for a user."""
-        profile = get_profile_by_user_id(self.db, user_id)
+        profile = ProfileRepository(self.db).get_by_user_id(user_id)
         if not profile:
             return "Unknown User", "N/A", "N/A"
         
@@ -97,7 +98,7 @@ class OrderService:
         orders = self.repo.get_by_seller(user_id, status=status, skip=skip, limit=limit)
         
         # 2. Fetch the seller profile for the total count
-        profile = get_profile_by_user_id(self.db, user_id)
+        profile = ProfileRepository(self.db).get_by_user_id(user_id)
         total_orders = profile.sellerCompletedOrdersCount if profile else 0
         
         # 3. Return wrapped response
@@ -189,7 +190,7 @@ class OrderService:
                         )
                     result = self.repo.mark_seller_complete(order)
                     # Increment seller completed order count
-                    increment_seller_orders_count(self.db, order.sellerId)
+                    ProfileRepository(self.db).increment_seller_orders_count(order.sellerId)
                     
                     # Notify Buyer
                     seller_name, _, _ = self._get_user_details(current_user_id)

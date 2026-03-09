@@ -1,3 +1,4 @@
+import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.services.category_service import CategoryService
@@ -15,7 +16,7 @@ def list_categories(skip: int = 0, limit: int = 100, db: Session = Depends(get_d
     return service.list_categories(skip=skip, limit=limit)
 
 @router.get("/{category_id}", response_model=CategoryOut)
-def get_category(category_id: int, db: Session = Depends(get_db)):
+def get_category(category_id: uuid.UUID, db: Session = Depends(get_db)):
     service = CategoryService(db)
     category = service.get_category(category_id)
     if not category:
@@ -41,7 +42,7 @@ def create_category(
 
 @router.patch("/{category_id}", response_model=CategoryOut)
 def update_category(
-    category_id: int,
+    category_id: uuid.UUID,
     obj_in: CategoryUpdate,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_admin_user),
@@ -54,7 +55,7 @@ def update_category(
 
 @router.delete("/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_category(
-    category_id: int,
+    category_id: uuid.UUID,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_admin_user),
 ):
@@ -64,7 +65,22 @@ def delete_category(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
     return None
 
+@router.get("/admin/{category_id}", response_model=CategoryTreeOut)
+def get_category_admin(
+    category_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_admin_user),
+):
+    """
+    Admin-only: Retrieve detailed category info including subcategories.
+    """
+    service = CategoryService(db)
+    category = service.get_category_admin(category_id)
+    if not category:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+    return category
+
 @router.get("/tree/", response_model=List[CategoryTreeOut])
-def get_category_tree(parent_id: int | None = None, db: Session = Depends(get_db)):
+def get_category_tree(parent_id: uuid.UUID | None = None, db: Session = Depends(get_db)):
     service = CategoryService(db)
     return service.get_category_tree(parent_id)
