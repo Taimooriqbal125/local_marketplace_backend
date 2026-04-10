@@ -6,17 +6,28 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException, status, UploadFile, BackgroundTasks
 from datetime import datetime
 from uuid import UUID
-from decimal import Decimal
 from typing import Optional, List
 
-from geoalchemy2.elements import WKTElement
-
 from app.models.profile import Profile
-from app.models.user import User
 from app.schemas.profile import ProfileCreate, ProfileUpdate
 from app.repositories import ProfileRepository, UserRepository
 from app.storage.cloudinary_service import cloudinary_service
 from app.core.config import settings
+
+
+class UserNotFoundError(HTTPException):
+    def __init__(self, detail: str = "User does not exist"):
+        super().__init__(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+
+
+class ProfileNotFoundError(HTTPException):
+    def __init__(self, detail: str = "Profile not found"):
+        super().__init__(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+
+
+class ProfileConflictError(HTTPException):
+    def __init__(self, detail: str = "A profile for this user already exists"):
+        super().__init__(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
 
 class ProfileService:
@@ -27,59 +38,36 @@ class ProfileService:
         self.repo = ProfileRepository(db)
         self.user_repo = UserRepository(db)
 
-    def _to_wkt(self, location_point) -> WKTElement | None:
-        """Convert a LocationPoint Pydantic model or dict to a PostGIS WKTElement."""
-        if location_point is None:
-            return None
-        if hasattr(location_point, "latitude"):
-            lat, lon = location_point.latitude, location_point.longitude
-        elif isinstance(location_point, dict):
-            lat, lon = location_point["latitude"], location_point["longitude"]
-        else:
-            return None
-        return WKTElement(f"POINT({lon} {lat})", srid=4326)
-
     async def create_profile(self, profile_data: ProfileCreate, file: Optional[UploadFile] = None) -> Profile:
         """Register a new profile."""
         # 1. Check if user exists
-        user = self.user_repo.get(profile_data.userId)
+        user = self.user_repo.get(profile_data.user_id)
         if not user:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="User does not exist"
-            )
+            raise UserNotFoundError()
         
         # 2. Check if profile already exists
-        if self.repo.get_by_user_id(profile_data.userId):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="A profile for this user already exists"
-            )
+        if self.repo.get_by_user_id(profile_data.user_id):
+            raise ProfileConflictError()
 
         # 3. Handle image upload
         if file:
-            folder_path = f"{settings.CLOUDINARY_FOLDER}/profiles/{profile_data.userId}"
+            folder_path = f"{settings.CLOUDINARY_FOLDER}/profiles/{profile_data.user_id}"
             upload_result = await cloudinary_service.upload_image(file, folder=folder_path)
-            profile_data.photoUrl = upload_result["url"]
+            profile_data.photo_url = upload_result["url"]
             profile_data.cloudinary_public_id = upload_result["public_id"]
 
-        # 4. Create profile object
-        new_profile = Profile(
-            **profile_data.model_dump(exclude={"last_location_point", "default_location_point", "last_location_at"}),
-            last_location_point=self._to_wkt(profile_data.last_location_point),
-            last_location_at=datetime.now() if profile_data.last_location_point else None,
-            default_location_point=self._to_wkt(profile_data.default_location_point),
-        )
-        return self.repo.create(new_profile)
+        # 4. Set accurate initial tracking data if location is provided
+        if profile_data.last_location_point:
+            profile_data.last_location_at = datetime.now()
+
+        # 5. Persist to Repository (Repo handles Geo WKT conversions and Model mapping)
+        return self.repo.create(profile_data)
 
     def get_profile(self, user_id: UUID) -> Profile:
         """Get a profile by user ID. Raises 404 if not found."""
         profile = self.repo.get_by_user_id(user_id)
         if not profile:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Profile not found"
-            )
+            raise ProfileNotFoundError()
         return profile
 
     def get_all_profiles(
@@ -108,33 +96,34 @@ class ProfileService:
         file: Optional[UploadFile] = None,
         background_tasks: Optional[BackgroundTasks] = None
     ) -> Profile:
-        """Update a profile's info."""
+        """Update a profile's info with safe background image removal."""
         db_profile = self.get_profile(user_id)
-        update_data = profile_data.model_dump(exclude_unset=True)
         
+        # 1. Handle image upload and replace logic
         if file:
             folder_path = f"{settings.CLOUDINARY_FOLDER}/profiles/{user_id}"
+            
+            # Delete old image safely
             if db_profile.cloudinary_public_id:
                 if background_tasks:
                     background_tasks.add_task(cloudinary_service.delete_image, db_profile.cloudinary_public_id)
                 else:
                     await cloudinary_service.delete_image(db_profile.cloudinary_public_id)
 
+            # Upload new image
             upload_result = await cloudinary_service.upload_image(file, folder=folder_path)
-            update_data["photoUrl"] = upload_result["url"]
-            update_data["cloudinary_public_id"] = upload_result["public_id"]
+            profile_data.photo_url = upload_result["url"]
+            profile_data.cloudinary_public_id = upload_result["public_id"]
 
-        if "last_location_point" in update_data:
-            update_data["last_location_at"] = datetime.now()
-            update_data["last_location_point"] = self._to_wkt(update_data["last_location_point"])
-        
-        if "default_location_point" in update_data:
-            update_data["default_location_point"] = self._to_wkt(update_data["default_location_point"])
+        # 2. Maintain freshness of timestamp if location is changed
+        if profile_data.last_location_point:
+            profile_data.last_location_at = datetime.now()
             
-        return self.repo.update(db_profile, update_data)
+        # 3. Persist to Repository
+        return self.repo.update(db_profile, profile_data)
 
     async def delete_profile(self, user_id: UUID, background_tasks: Optional[BackgroundTasks] = None) -> None:
-        """Delete a profile."""
+        """Delete a profile safely removing cloud media dependencies."""
         db_profile = self.get_profile(user_id)
         
         if db_profile.cloudinary_public_id:

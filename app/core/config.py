@@ -14,7 +14,8 @@ class Settings(BaseSettings):
     # Auth - MUST be in .env (change in production)
     SECRET_KEY: str = Field(..., description="Secret for JWT (min 32 chars)")
     ALGORITHM: str = Field(default="HS256", description="JWT algorithm")
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=14440, description="Token expiry")
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, description="Access token expiry in minutes")
+    REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=14, description="Refresh token expiry in days")
     
     # Cloudinary - Add these for image upload
     CLOUDINARY_CLOUD_NAME: str = Field(..., description="Cloudinary cloud name")
@@ -25,6 +26,20 @@ class Settings(BaseSettings):
     # Notifications - Add these for notification retention
     DELETE_READ_NOTIFICATIONS_IN_DAYS: int = Field(..., description="Days to keep read notifications")
     DELETE_UNREAD_NOTIFICATIONS_IN_DAYS: int = Field(..., description="Days to keep unread notifications")
+
+    # SendGrid Email Settings
+    SENDGRID_API_KEY: str = Field(..., description="Twilio SendGrid API Key")
+    SENDGRID_FROM_EMAIL: str = Field(..., description="Verified sender email for SendGrid")
+
+    # Infra Settings
+    REDIS_URL: str = Field(
+        default="redis://localhost:6379/0",
+        description="Redis connection URL"
+    )
+    LOG_LEVEL: str = Field(
+        default="INFO",
+        description="Application log level"
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

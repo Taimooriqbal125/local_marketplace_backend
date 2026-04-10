@@ -16,6 +16,32 @@ from app.schemas.review import ReviewCreate
 from app.models.review import Review
 from app.services.notification_service import NotificationService
 from app.models.notification import NotificationType
+from app.models.user import User
+
+
+class OrderNotFoundError(HTTPException):
+    def __init__(self, detail: str = "Order not found"):
+        super().__init__(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+
+
+class OrderStateError(HTTPException):
+    def __init__(self, detail: str = "You can only review an order after it has been completed"):
+        super().__init__(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
+class ReviewForbiddenError(HTTPException):
+    def __init__(self, detail: str = "Only the buyer of an order is authorized to leave a review"):
+        super().__init__(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
+
+
+class ReviewDuplicateError(HTTPException):
+    def __init__(self, detail: str = "You have already reviewed this order"):
+        super().__init__(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
+class ReviewNotFoundError(HTTPException):
+    def __init__(self, detail: str = "Review not found"):
+        super().__init__(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
 
 
 class ReviewService:
@@ -30,50 +56,28 @@ class ReviewService:
 
     async def create_review(self, obj_in: ReviewCreate, current_user_id: uuid.UUID) -> Review:
         """
-        Create a new review for an order.
-        
-        Business Rules:
-        1. Order must exist.
-        2. Order must be in 'completed' status.
-        3. Reviewer must be the Buyer of the order (Sellers cannot review).
-        4. User cannot review the same order twice (enforced by DB unique constraint).
+        Create a new review for an order enforcing state and security rules.
         """
         # 1. Fetch the order
-        order = self.order_repo.get(obj_in.orderId)
+        order = self.order_repo.get(obj_in.order_id)
         if not order:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Order not found"
-            )
+            raise OrderNotFoundError()
 
-        # 2. Check order status
-        # Note: Usually, we only allow reviews for completed orders
+        # 2. Check strict order status
         if order.status != "completed":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="You can only review an order after it has been completed"
-            )
+            raise OrderStateError()
 
         # 3. Verify ownership: ONLY the buyer can leave a review
         is_buyer = order.buyerId == current_user_id
-
         if not is_buyer:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only the buyer of an order is authorized to leave a review"
-            )
+            raise ReviewForbiddenError()
 
-        # Auto-discover reviewedUserId (always the seller since only buyer reviews)
         reviewed_user_id = order.sellerId
 
-        # 4. Check for duplicate review (Prevent 500 error from DB constraint)
-        existing_reviews = self.repo.get_by_order(obj_in.orderId)
-        for r in existing_reviews:
-            if r.reviewerId == current_user_id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="You have already reviewed this order"
-                )
+        # 4. Check for duplicate review preemptively
+        existing_reviews = self.repo.get_by_order(obj_in.order_id)
+        if any(r.reviewerId == current_user_id for r in existing_reviews):
+            raise ReviewDuplicateError()
 
         # 5. Create the review
         review = self.repo.create(
@@ -89,14 +93,12 @@ class ReviewService:
         reviewer_profile = self.profile_repo.get_by_user_id(current_user_id)
         reviewer_name = reviewer_profile.name if reviewer_profile else "A Buyer"
 
-        # Explicitly fetch order for listing context
-        order = self.order_repo.get(obj_in.orderId)
         listing_title = order.listing.title if order and order.listing else "your service"
 
         await self.notification_service.send_notification(
             user_id=reviewed_user_id,
             sender_id=current_user_id,
-            order_id=obj_in.orderId,
+            order_id=obj_in.order_id,
             listing_id=order.listingId if order else None,
             type=NotificationType.REVIEW_RECEIVED,
             title="New Review Received",
@@ -109,10 +111,7 @@ class ReviewService:
         """Fetch a single review or raise 404."""
         review = self.repo.get(review_id)
         if not review:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Review not found"
-            )
+            raise ReviewNotFoundError()
         return review
 
     def list_received_reviews(
@@ -136,15 +135,13 @@ class ReviewService:
         review = self.get_review(review_id)
         
         if review.reviewerId != current_user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only the author can delete this review"
-            )
+            raise ReviewForbiddenError("Only the author can delete this review")
             
         self.repo.delete(review)
 
     def list_all_reviews(
         self,
+        current_user: User,
         days: Optional[int] = None,
         skip: int = 0,
         limit: int = 100
@@ -152,6 +149,9 @@ class ReviewService:
         """
         Fetch all reviews for admin listing with optional date range.
         """
+        if not current_user.is_admin:
+            raise ReviewForbiddenError("Only administrators can access the full review listing.")
+            
         start_date = None
         if days:
             start_date = datetime.now(timezone.utc) - timedelta(days=days)

@@ -4,7 +4,7 @@ Security utilities — password hashing and JWT tokens.
 
 import uuid
 import bcrypt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from jose import jwt, JWTError
@@ -17,7 +17,9 @@ from app.db.session import get_db
 from app.models.user import User
 from app.repositories import UserRepository
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/users/login")
+oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/users/login", auto_error=False)
+LAST_ACTIVE_UPDATE_INTERVAL = timedelta(minutes=5)
 
 
 # ---------- Password Hashing ----------
@@ -45,7 +47,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     if "sub" in to_encode and to_encode["sub"] is not None:
         to_encode["sub"] = str(to_encode["sub"])
 
-    expire = datetime.utcnow() + (
+    expire = datetime.now(timezone.utc) + (
         expires_delta if expires_delta else timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
     to_encode.update({"exp": expire})
@@ -55,10 +57,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 # ---------- Dependencies ----------
 
-def get_current_user(
-    db: Session = Depends(get_db),
-    token: str = Depends(oauth2_scheme),
-) -> User:
+def _resolve_user_from_token(db: Session, token: str) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -74,19 +73,38 @@ def get_current_user(
         # Validate UUID format
         user_uuid = uuid.UUID(user_id)
 
-    except JWTError as e:
-        print(f"DEBUG: JWT Decode Error: {e}")
+    except JWTError:
         raise credentials_exception
-    except ValueError as e:
-        print(f"DEBUG: UUID Conversion Error: {e}")
+    except ValueError:
         raise credentials_exception
 
-    user = UserRepository(db).get(user_uuid)
+    repo = UserRepository(db)
+    user = repo.get(user_uuid)
     if user is None:
-        print(f"DEBUG: User not found in DB: {user_uuid}")
         raise credentials_exception
+
+    # Keep a lightweight activity heartbeat without writing on every request.
+    user = repo.touch_last_active_if_stale(
+        db_user=user,
+        min_interval=LAST_ACTIVE_UPDATE_INTERVAL,
+    )
 
     return user
+
+def get_current_user(
+    db: Session = Depends(get_db),
+    token: str = Depends(oauth2_scheme),
+) -> User:
+    return _resolve_user_from_token(db, token)
+
+
+def get_optional_current_user(
+    db: Session = Depends(get_db),
+    token: Optional[str] = Depends(oauth2_scheme_optional),
+) -> Optional[User]:
+    if not token:
+        return None
+    return _resolve_user_from_token(db, token)
 
 
 def get_current_admin_user(current_user: User = Depends(get_current_user)) -> User:

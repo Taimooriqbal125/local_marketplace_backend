@@ -46,8 +46,7 @@ async def upload_media(
     - Returns the new media record including the hosted image URL.
     - Only the listing owner can upload media.
     """
-    service = ListingMediaService(db)
-    return await service.upload_and_add_media(
+    return await ListingMediaService(db).upload_and_add_media(
         listing_id=listing_id,
         file=file,
         sort_order=sort_order,
@@ -73,8 +72,7 @@ def add_media(
     or an external CDN).  For direct file uploads use POST /{listing_id}/upload instead.
     Only the listing owner can add media.
     """
-    service = ListingMediaService(db)
-    return service.add_media(obj_in, current_seller_id=current_user.id)
+    return ListingMediaService(db).add_media(obj_in, current_seller_id=current_user.id)
 
 
 # ── Read ──────────────────────────────────────────────────────────────────────
@@ -85,8 +83,7 @@ def get_listing_media(
     db: Session = Depends(get_db),
 ):
     """Fetch all media associated with a specific listing, ordered by sort_order."""
-    service = ListingMediaService(db)
-    return service.get_listing_media(listing_id)
+    return ListingMediaService(db).get_listing_media(listing_id)
 
 
 @router.get("/{media_id}", response_model=ListingMediaResponse)
@@ -95,8 +92,7 @@ def get_media(
     db: Session = Depends(get_db),
 ):
     """Fetch a single media record by ID."""
-    service = ListingMediaService(db)
-    return service.get_media(media_id)
+    return ListingMediaService(db).get_media(media_id)
 
 
 # ── Update ────────────────────────────────────────────────────────────────────
@@ -112,8 +108,7 @@ def update_media(
     Update a media record (e.g. change sortOrder or imageUrl).
     Only the listing owner can update its media.
     """
-    service = ListingMediaService(db)
-    return service.update_media(media_id, obj_in, current_seller_id=current_user.id)
+    return ListingMediaService(db).update_media(media_id, obj_in, current_seller_id=current_user.id)
 
 
 # ── Delete ────────────────────────────────────────────────────────────────────
@@ -131,8 +126,7 @@ async def delete_media(
     - Listing Owner: Can delete.
     - Admin: Can delete any media.
     """
-    service = ListingMediaService(db)
-    await service.delete_media(
+    await ListingMediaService(db).delete_media(
         media_id=media_id, 
         current_seller_id=current_user.id, 
         is_admin=current_user.is_admin

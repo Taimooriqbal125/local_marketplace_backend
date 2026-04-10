@@ -39,7 +39,7 @@ class NotificationRepository:
         return (
             self.db.query(Notification)
             .filter(Notification.userId == user_id)
-            .order_by(Notification.createdAt.desc())
+            .order_by(Notification.created_at.desc())
             .offset(skip)
             .limit(limit)
             .all()
@@ -52,7 +52,7 @@ class NotificationRepository:
         return (
             self.db.query(Notification)
             .filter(Notification.userId == user_id, Notification.isRead == False)
-            .order_by(Notification.createdAt.desc())
+            .order_by(Notification.created_at.desc())
             .offset(skip)
             .limit(limit)
             .all()
@@ -165,7 +165,7 @@ class NotificationRepository:
         # 2. Delete expired UNREAD notifications
         unread_deleted = (
             self.db.query(Notification)
-            .filter(Notification.isRead == False, Notification.createdAt < unread_cutoff)
+            .filter(Notification.isRead == False, Notification.created_at < unread_cutoff)
             .delete(synchronize_session=False)
         )
 

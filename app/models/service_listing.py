@@ -1,23 +1,44 @@
 import uuid
-from typing import Optional
+from datetime import datetime
+from typing import Optional, TYPE_CHECKING, Any
 
 from sqlalchemy import String, Text, Boolean, Numeric, Float, ForeignKey, DateTime, text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.sql import func
 from geoalchemy2 import Geography
 
-from app.db.base_class import Base
+from app.db.base_class import Base, TimestampMixin
+
+if TYPE_CHECKING:
+    from .user import User
+    from .cities import City
+    from .category import Category
+    from .listing_media import ListingMedia
+    from .order import Order
+    from .notification import Notification
 
 
-class ServiceListing(Base):
+class ServiceListing(Base, TimestampMixin):
     """
     Represents a service offered by a seller on the local marketplace.
+    Contains price, location, category, and lifecycle information.
 
-    Relationships:
-        - seller  → User   (many-to-one)
-        - city    → City   (many-to-one, MVP)
-        - category → Category (many-to-one)
+    Attributes:
+        id (uuid.UUID): Primary key.
+        sellerId (uuid.UUID): ID of the user offering the service.
+        cityId (uuid.UUID): ID of the city where the service is located.
+        categoryId (uuid.UUID): ID of the service category.
+        title (str): Brief headline for the listing.
+        description (str): Detailed text about the service.
+        priceType (str): Pricing model (fixed, hourly, etc.).
+        priceAmount (float): Monetary value of the service.
+        isNegotiable (bool): Whether the price can be discussed.
+        serviceLocation (str): Human-readable address.
+        serviceRadiusKm (float): Operational radius for the service.
+        service_location (Geography): PostGIS Geography point (lon, lat).
+        status (str): Current state of the listing (active, draft, etc.).
+        created_at (datetime): Timestamp from TimestampMixin.
+        updated_at (datetime): Timestamp from TimestampMixin.
     """
 
     __tablename__ = "service_listings"
@@ -26,154 +47,133 @@ class ServiceListing(Base):
         UniqueConstraint("title", "description", name="uq_service_listings_title_description"),
     )
 
-    # ── Primary Key ──────────────────────────────────────────────────────────
+    # Primary Key
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
         index=True,
+        doc="Unique identifier for the service listing."
     )
 
-    # ── Foreign Keys ─────────────────────────────────────────────────────────
-
-    # sellerId → users.id  (required; cascade-delete so listings are removed when user is deleted)
+    # Foreign Keys (CamelCase preserved for compatibility)
     sellerId: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
+        doc="Owner of the listing."
     )
-
-    # cityId → cities.id  (MVP: optional at schema level so it can be phased in)
     cityId: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("cities.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
+        doc="Geographic city association."
     )
-
-    # categoryId → categories.id  (required)
     categoryId: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("categories.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
+        doc="Service category link."
     )
 
-    # ── Core Fields ──────────────────────────────────────────────────────────
-
-    # title: short, searchable headline for the listing
+    # Core Information
     title: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
         index=True,
+        doc="Short headline of the service."
     )
-
-    # description: full details of the service (up to ~64 KB in Postgres TEXT)
     description: Mapped[Optional[str]] = mapped_column(
         Text,
         nullable=True,
+        doc="Detailed description of the service offered."
     )
 
-    # ── Pricing ──────────────────────────────────────────────────────────────
-
-    # priceType: e.g. "fixed", "hourly", "daily", "negotiable"
+    # Pricing
     priceType: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
         server_default=text("'fixed'"),
+        doc="Model of pricing (fixed, hourly, daily)."
     )
-
-    # priceAmount: monetary value (up to 10 digits, 2 decimal places)
     priceAmount: Mapped[Optional[float]] = mapped_column(
         Numeric(10, 2),
         nullable=True,
+        doc="Numeric price value."
     )
-
-    # isNegotiable: buyer can haggle on final price
     isNegotiable: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         server_default=text("false"),
+        doc="Indicates if the seller accepts price negotiations."
     )
 
-    # ── Location ─────────────────────────────────────────────────────────────
-
-    # serviceLocation: human-readable address or area description
+    # Location Services
     serviceLocation: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
+        doc="Human-readable location or area name."
     )
-
-    # serviceRadiusKm: how far (in km) the seller is willing to travel / serve
     serviceRadiusKm: Mapped[float] = mapped_column(
         Float,
         nullable=False,
+        doc="Serviceable radius from the center point in kilometers."
     )
-
-    # service_location: PostGIS Geography point (lon, lat, WGS84)
-    service_location: Mapped[Optional[object]] = mapped_column(
+    service_location: Mapped[Optional[Any]] = mapped_column(
         Geography(geometry_type="POINT", srid=4326),
         nullable=True,
+        doc="PostGIS point for precise geospatial searches."
     )
 
-    # ── Moderation / Lifecycle ────────────────────────────────────────────────
-
-    # status: "draft" | "active" | "paused" | "closed" | "banned"
+    # Lifecycle Management
     status: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
         server_default=text("'draft'"),
         index=True,
+        doc="Current status (draft, active, paused, closed, banned)."
     )
 
-    # ── Timestamps ────────────────────────────────────────────────────────────
-    createdAt: Mapped[str] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-    )
-
-    updatedAt: Mapped[str] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-        onupdate=func.now(),
-    )
-
-    # ── Relationships ─────────────────────────────────────────────────────────
+    # Relationships
     seller: Mapped["User"] = relationship(
         "User",
         back_populates="service_listings",
         lazy="joined",
+        doc="The User who owns this listing."
     )
-
     city: Mapped[Optional["City"]] = relationship(
         "City",
         lazy="joined",
+        doc="The city where this service is provided."
     )
-
     category: Mapped["Category"] = relationship(
         "Category",
         lazy="joined",
+        doc="The category classification of this service."
     )
-
     media: Mapped[list["ListingMedia"]] = relationship(
         "ListingMedia",
         back_populates="listing",
         cascade="all, delete-orphan",
         lazy="selectin",
-        order_by="ListingMedia.sortOrder"
+        order_by="ListingMedia.sortOrder",
+        doc="Associated images and videos."
     )
-
     orders: Mapped[list["Order"]] = relationship(
         "Order",
         back_populates="listing",
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
+        doc="Orders placed for this specific listing."
     )
-
     notifications: Mapped[list["Notification"]] = relationship(
         "Notification",
         back_populates="listing",
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
+        doc="System notifications related to this listing."
     )
+
+    def __repr__(self) -> str:
+        return f"<ServiceListing(id={self.id}, title='{self.title[:20]}...', status='{self.status}')>"

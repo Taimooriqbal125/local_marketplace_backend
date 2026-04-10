@@ -1,53 +1,81 @@
 import uuid
-from sqlalchemy import Column, String, Integer, ForeignKey, DateTime, text, UniqueConstraint
+from typing import Optional, TYPE_CHECKING
+
+from sqlalchemy import String, Integer, ForeignKey, text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.sql import func
-from app.db.base_class import Base
 
-class ListingMedia(Base):
+from app.db.base_class import Base, TimestampMixin
+
+if TYPE_CHECKING:
+    from .service_listing import ServiceListing
+
+
+class ListingMedia(Base, TimestampMixin):
     """
-    Model representing media files (images) associated with a ServiceListing.
+    Model representing media files (images or video metadata) associated with a ServiceListing.
+    Includes Cloudinary references for asset management.
+
+    Attributes:
+        id (uuid.UUID): Primary key.
+        listingId (uuid.UUID): ID of the listing this media belongs to.
+        imageUrl (str): Full URL of the asset (pointing to Cloudinary or S3).
+        cloudinaryPublicId (str): Cloudinary asset identifier for deletion/transformation.
+        sortOrder (int): Position in the gallery (0 for primary thumbnail).
+        created_at (datetime): From TimestampMixin.
+        updated_at (datetime): From TimestampMixin.
     """
+
     __tablename__ = "listing_media"
+
     __table_args__ = (
-        # Ensure that the same image URL isn't added multiple times to the same listing
         UniqueConstraint("listingId", "imageUrl", name="uq_listing_media_listing_image"),
     )
 
+    # Primary Key
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
-        index=True
+        index=True,
+        doc="Unique identifier for the media record."
     )
 
+    # Foreign Link
     listingId: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("service_listings.id", ondelete="CASCADE"),
         nullable=False,
-        index=True
+        index=True,
+        doc="Reference to the parent ServiceListing."
     )
 
-    # imageUrl (string) — Required
-    # Stores the HTTPS URL returned by Cloudinary after upload
-    imageUrl: Mapped[str] = mapped_column(String(500), nullable=False)
-
-    # cloudinaryPublicId — Optional
-    # Stores the Cloudinary public_id so we can delete the asset on record removal.
-    # Nullable because records created directly with a URL won't have one.
-    cloudinaryPublicId: Mapped[str] = mapped_column(String(300), nullable=True)
-
-    # sortOrder (int) — Default 0
-    # Allows ordering of images (e.g. 0 is the primary thumbnail)
-    sortOrder: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
-
-    # createdAt — Required, Default: now()
-    createdAt: Mapped[str] = mapped_column(
-        DateTime(timezone=True),
+    # Media Content
+    imageUrl: Mapped[str] = mapped_column(
+        String(500),
         nullable=False,
-        server_default=func.now()
+        doc="Public HTTPS URL for the image or video asset."
+    )
+    cloudinaryPublicId: Mapped[Optional[str]] = mapped_column(
+        String(300),
+        nullable=True,
+        doc="Cloudinary identifier used for server-side asset management."
+    )
+
+    # Ordering
+    sortOrder: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+        doc="Display order relative to other media in the same listing."
     )
 
     # Relationship back to ServiceListing
-    listing: Mapped["ServiceListing"] = relationship("ServiceListing", back_populates="media")
+    listing: Mapped["ServiceListing"] = relationship(
+        "ServiceListing",
+        back_populates="media",
+        doc="The listing this media is associated with."
+    )
+
+    def __repr__(self) -> str:
+        return f"<ListingMedia(id={self.id}, listingId={self.listingId}, sortOrder={self.sortOrder})>"

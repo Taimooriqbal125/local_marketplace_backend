@@ -20,7 +20,7 @@ from app.schemas.review import (
     ReviewResponse,
     AdminReviewResponse,
     ReviewReceivedResponse,
-    ReviewForServiceResponse,
+    ReviewByUserResponse,
     ReviewCreateResponse,
     ReviewGivenResponse
 )
@@ -45,8 +45,7 @@ async def create_review(
     - **rating**: 1 to 5 stars
     - **comment**: Optional feedback
     """
-    service = ReviewService(db)
-    return await service.create_review(obj_in, current_user.id)
+    return await ReviewService(db).create_review(obj_in, current_user.id)
 
 
 # ============================================================
@@ -65,15 +64,7 @@ def get_all_reviews(
     
     **Restricted to Administrators only.**
     """
-    # Restricted to Admin Only
-    if not current_user.is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only administrators can access the full review listing."
-        )
-
-    service = ReviewService(db)
-    return service.list_all_reviews(days=days, skip=skip, limit=limit)
+    return ReviewService(db).list_all_reviews(current_user=current_user, days=days, skip=skip, limit=limit)
 
 
 # ============================================================
@@ -88,8 +79,7 @@ def get_my_received_reviews(
     current_user: User = Depends(get_current_user)
 ):
     """Get all reviews received by the authenticated user."""
-    service = ReviewService(db)
-    return service.list_received_reviews(current_user.id, rating=rating, skip=skip, limit=limit)
+    return ReviewService(db).list_received_reviews(current_user.id, rating=rating, skip=skip, limit=limit)
 
 
 # ============================================================
@@ -103,23 +93,22 @@ def get_my_given_reviews(
     current_user: User = Depends(get_current_user)
 ):
     """Get all reviews written by the authenticated user."""
-    service = ReviewService(db)
-    return service.list_given_reviews(current_user.id, skip=skip, limit=limit)
+    return ReviewService(db).list_given_reviews(current_user.id, skip=skip, limit=limit)
 
 
 # ============================================================
-#  GET /reviews/service/{listing_id}  →  Reviews by service
+#  GET /reviews/byuserid/{user_id}  →  Reviews received by user id
 # ============================================================
-@router.get("/service/{listing_id}", response_model=list[ReviewForServiceResponse])
-def get_reviews_by_service(
-    listing_id: UUID,
+@router.get("/byuserid/{user_id}", response_model=list[ReviewByUserResponse])
+def get_reviews_by_user_id(
+    user_id: UUID,
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
+    rating: Optional[int] = Query(None, ge=1, le=5, description="Filter by star rating"),
     db: Session = Depends(get_db)
 ):
-    """Get all reviews for a specific service listing."""
-    service = ReviewService(db)
-    return service.list_reviews_by_listing(listing_id, skip=skip, limit=limit)
+    """Get all reviews received by a specific user id (not reviews written by that user)."""
+    return ReviewService(db).list_received_reviews(user_id=user_id, rating=rating, skip=skip, limit=limit)
 
 
 # ============================================================
@@ -131,8 +120,7 @@ def get_review(
     db: Session = Depends(get_db)
 ):
     """Fetch details of a single review."""
-    service = ReviewService(db)
-    return service.get_review(id)
+    return ReviewService(db).get_review(id)
 
 
 # ============================================================
@@ -149,6 +137,5 @@ def delete_review(
     
     Only the author of the review can perform this action.
     """
-    service = ReviewService(db)
-    service.delete_review(id, current_user.id)
+    ReviewService(db).delete_review(id, current_user.id)
     return None

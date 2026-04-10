@@ -1,23 +1,32 @@
+"""Pydantic schemas for City resource."""
+
 from __future__ import annotations
-import uuid
-from datetime import datetime
-from typing import Optional, Any
-from pydantic import BaseModel, Field, field_validator, model_validator
 
 import re
+from uuid import UUID
+from typing import Optional, Any
+
+from pydantic import Field, field_validator, model_validator
+
+from .base import BaseSchema
+
 
 SLUG_REGEX = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
-class CityBase(BaseModel):
+
+class CityBase(BaseSchema):
+    """
+    Fields shared across all City schema variants.
+    """
     name: str = Field(..., min_length=2, max_length=100)
     country: str = Field(..., min_length=2, max_length=100)
-    centerPoint: str | None = Field(
+    center_point: Optional[str] = Field(
         default=None, 
         max_length=50, 
         description="Default geographic center (lat,lng) for searches in this city."
     )
-    isActive: bool = Field(default=True)
-    slug: str | None = Field(default=None, min_length=2, max_length=120)
+    is_active: bool = Field(default=True)
+    slug: Optional[str] = Field(default=None, min_length=2, max_length=120)
 
     @model_validator(mode="before")
     @classmethod
@@ -53,24 +62,28 @@ class CityBase(BaseModel):
             raise ValueError("slug must be lowercase and URL-friendly (e.g. 'karachi')")
         return v
 
+
 class CityCreate(CityBase):
     """
-    POST /cities
-    Admin creates cities by providing name and country. 
-    Slug is auto-generated if omitted.
+    Payload for POST /cities.
+    Slug is automatically generated from name if not provided.
     """
     pass
 
-class CityUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=2, max_length=100)
-    country: str | None = Field(default=None, min_length=2, max_length=100)
-    centerPoint: str | None = Field(default=None, max_length=50)
-    isActive: bool | None = Field(default=None)
-    slug: str | None = Field(default=None, min_length=2, max_length=120)
+
+class CityUpdate(BaseSchema):
+    """
+    Payload for PATCH /cities/{id}.
+    """
+    name: Optional[str] = Field(default=None, min_length=2, max_length=100)
+    country: Optional[str] = Field(default=None, min_length=2, max_length=100)
+    center_point: Optional[str] = Field(default=None, max_length=50)
+    is_active: Optional[bool] = None
+    slug: Optional[str] = None
 
     @field_validator("slug")
     @classmethod
-    def slug_validate(cls, v: str | None) -> str | None:
+    def slug_validate(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return v
         v = v.strip().lower()
@@ -81,12 +94,14 @@ class CityUpdate(BaseModel):
             raise ValueError("slug must be lowercase and URL-friendly")
         return v
 
-class CityOut(BaseModel):
-    id: uuid.UUID
+
+class CityOut(BaseSchema):
+    """
+    Output model for City details.
+    """
+    id: UUID
     name: str
     country: str
     slug: str
-    isActive: bool
-    centerPoint: str | None = None
-
-    model_config = dict(from_attributes=True)
+    is_active: bool
+    center_point: Optional[str] = None

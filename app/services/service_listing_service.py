@@ -23,6 +23,12 @@ from geoalchemy2.shape import to_shape
 from app.schemas.services_listing import (
     ServiceListingCreate,
     ServiceListingListResponse,
+    ServiceListingMeListResponse,
+    ServiceListingMeResponse,
+    ServiceListingProfileSummaryListResponse,
+    ServiceListingProfileSummaryResponse,
+    ServiceListingPublicListResponse,
+    ServiceListingPublicResponse,
     ServiceListingNearbyListResponse,
     ServiceListingNearbyResponse,
     ServiceListingResponse,
@@ -37,7 +43,6 @@ from app.schemas.services_listing import (
 
 class ListingNotFoundError(HTTPException):
     """Raised when a listing ID does not exist in the database."""
-
     def __init__(self, listing_id: uuid.UUID) -> None:
         super().__init__(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -47,7 +52,6 @@ class ListingNotFoundError(HTTPException):
 
 class ListingForbiddenError(HTTPException):
     """Raised when a user tries to mutate a listing they don't own."""
-
     def __init__(self) -> None:
         super().__init__(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -57,11 +61,37 @@ class ListingForbiddenError(HTTPException):
 
 class DuplicateListingError(HTTPException):
     """Raised when a listing with the same title and description already exists."""
-
     def __init__(self) -> None:
         super().__init__(
             status_code=status.HTTP_409_CONFLICT,
             detail="A service listing with this title and description already exists.",
+        )
+
+
+class InvalidPricingRuleError(HTTPException):
+    """Raised when pricing fields violate business rules."""
+    def __init__(self, detail: str) -> None:
+        super().__init__(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=detail,
+        )
+
+
+class UserProfileNotFoundError(HTTPException):
+    """Raised when searching nearby from a profile that doesn't exist."""
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profile not found. Create a profile first.",
+        )
+
+
+class ProfileLocationMissingError(HTTPException):
+    """Raised when a profile tries proximity search without location configuration."""
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No location saved on your profile. Update your location first via PATCH /profiles/me/location",
         )
 
 
@@ -77,6 +107,19 @@ class ServiceListingService:
 
     def __init__(self, db: Session) -> None:
         self.repo = ServiceListingRepository(db)
+
+    @staticmethod
+    def _validate_pricing_rules(*, price_type: str, is_negotiable: bool) -> None:
+        allowed_price_types = {"fixed", "hourly", "daily"}
+        if price_type not in allowed_price_types:
+            raise InvalidPricingRuleError(
+                "price_type must be one of: fixed, hourly, daily."
+            )
+
+        if price_type == "fixed" and is_negotiable:
+            raise InvalidPricingRuleError(
+                "price_type 'fixed' cannot be negotiable. Set is_negotiable to false or use 'hourly'/'daily'."
+            )
 
     # ── Read Operations ──────────────────────────────────────────────────────
 
@@ -94,6 +137,7 @@ class ServiceListingService:
         category_id: Optional[uuid.UUID] = None,
         city_id: Optional[uuid.UUID] = None,
         seller_id: Optional[uuid.UUID] = None,
+        exclude_seller_id: Optional[uuid.UUID] = None,
         is_negotiable: Optional[bool] = None,
         price_type: Optional[str] = None,
         min_price: Optional[Decimal] = None,
@@ -105,7 +149,7 @@ class ServiceListingService:
         category_slug: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
-    ) -> ServiceListingListResponse:
+    ) -> ServiceListingPublicListResponse:
         """
         Browse listings with optional filters.
         Returns a paginated response with total count metadata.
@@ -116,6 +160,7 @@ class ServiceListingService:
             category_id=category_id,
             city_id=city_id,
             seller_id=seller_id,
+            exclude_seller_id=exclude_seller_id,
             is_negotiable=is_negotiable,
             price_type=price_type,
             min_price=min_price,
@@ -128,11 +173,65 @@ class ServiceListingService:
             skip=skip,
             limit=page_size,
         )
-        return ServiceListingListResponse(
+        return ServiceListingPublicListResponse(
             total=total,
             page=page,
-            pageSize=page_size,
-            results=[ServiceListingResponse.model_validate(r) for r in results],
+            page_size=page_size,
+            results=[ServiceListingPublicResponse.model_validate(r) for r in results],
+        )
+
+    def list_profile_listing_summaries(
+        self,
+        *,
+        profile_id: uuid.UUID,
+        status: Optional[str] = "active",
+        category_id: Optional[uuid.UUID] = None,
+        city_id: Optional[uuid.UUID] = None,
+        exclude_seller_id: Optional[uuid.UUID] = None,
+        is_negotiable: Optional[bool] = None,
+        price_type: Optional[str] = None,
+        min_price: Optional[Decimal] = None,
+        max_price: Optional[Decimal] = None,
+        search: Optional[str] = None,
+        top_selling: bool = False,
+        top_rating: bool = False,
+        city_slug: Optional[str] = None,
+        category_slug: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> ServiceListingProfileSummaryListResponse:
+        """
+        Return lightweight listing cards for a specific profile/user.
+        Useful for profile storefronts where only name/photo/price are needed.
+        """
+        skip = (page - 1) * page_size
+        results, total = self.repo.get_filtered(
+            status=status,
+            category_id=category_id,
+            city_id=city_id,
+            seller_id=profile_id,
+            exclude_seller_id=exclude_seller_id,
+            is_negotiable=is_negotiable,
+            price_type=price_type,
+            min_price=min_price,
+            max_price=max_price,
+            search=search,
+            top_selling=top_selling,
+            top_rating=top_rating,
+            city_slug=city_slug,
+            category_slug=category_slug,
+            skip=skip,
+            limit=page_size,
+        )
+        return ServiceListingProfileSummaryListResponse(
+            profile_id=profile_id,
+            total_services=total,
+            page=page,
+            page_size=page_size,
+            results=[
+                ServiceListingProfileSummaryResponse.model_validate(r)
+                for r in results
+            ],
         )
 
     def list_my_listings(
@@ -151,7 +250,7 @@ class ServiceListingService:
         category_slug: Optional[str] = None,
         page: int = 1,
         page_size: int = 20,
-    ) -> ServiceListingListResponse:
+    ) -> ServiceListingMeListResponse:
         """
         Return all listings for the authenticated seller.
         Pass status=None to see all (drafts, paused, active, etc.).
@@ -159,7 +258,7 @@ class ServiceListingService:
         skip = (page - 1) * page_size
         results, total = self.repo.get_filtered(
             seller_id=seller_id,
-            status=status,            # seller can filter by their own status
+            status=status,
             category_id=category_id,
             is_negotiable=is_negotiable,
             price_type=price_type,
@@ -173,11 +272,11 @@ class ServiceListingService:
             skip=skip,
             limit=page_size,
         )
-        return ServiceListingListResponse(
+        return ServiceListingMeListResponse(
             total=total,
             page=page,
-            pageSize=page_size,
-            results=[ServiceListingResponse.model_validate(r) for r in results],
+            page_size=page_size,
+            results=[ServiceListingMeResponse.model_validate(r) for r in results],
         )
 
     # ── Write Operations ─────────────────────────────────────────────────────
@@ -192,6 +291,11 @@ class ServiceListingService:
         seller_id is always taken from the auth context, never from the body.
         Checks for uniqueness of title and description.
         """
+        self._validate_pricing_rules(
+            price_type=obj_in.price_type,
+            is_negotiable=obj_in.is_negotiable,
+        )
+
         existing = self.repo.get_by_title_and_description(
             title=obj_in.title, description=obj_in.description
         )
@@ -218,19 +322,28 @@ class ServiceListingService:
         if not listing:
             raise ListingNotFoundError(listing_id)
 
-        # ✅ Basic permission: Owner or Admin
         if listing.sellerId != current_seller_id and not is_admin:
             raise ListingForbiddenError()
 
-        # ✅ Security Rule: Only admin can set 'banned' status
         if obj_in.status == "banned" and not is_admin:
             raise ListingForbiddenError()
 
-        # ✅ Security Rule: If already banned, only admin can edit/unban
         if listing.status == "banned" and not is_admin:
             raise ListingForbiddenError()
 
-        # Check for uniqueness if title or description is being updated
+        effective_price_type = (
+            obj_in.price_type if obj_in.price_type is not None else listing.priceType
+        )
+        effective_is_negotiable = (
+            obj_in.is_negotiable
+            if obj_in.is_negotiable is not None
+            else listing.isNegotiable
+        )
+        self._validate_pricing_rules(
+            price_type=effective_price_type,
+            is_negotiable=effective_is_negotiable,
+        )
+
         if obj_in.title is not None or obj_in.description is not None:
             new_title = obj_in.title if obj_in.title is not None else listing.title
             new_description = (
@@ -239,7 +352,6 @@ class ServiceListingService:
                 else listing.description
             )
 
-            # Only check if the content actually changed
             if new_title != listing.title or new_description != listing.description:
                 existing = self.repo.get_by_title_and_description(
                     title=new_title, description=new_description
@@ -265,7 +377,6 @@ class ServiceListingService:
         if not listing:
             raise ListingNotFoundError(listing_id)
         
-        # ✅ Allow deletion if user is the owner OR if they are an admin
         if listing.sellerId != current_user_id and not is_admin:
             raise ListingForbiddenError()
             
@@ -286,7 +397,7 @@ class ServiceListingService:
         return ServiceListingListResponse(
             total=total,
             page=page,
-            pageSize=page_size,
+            page_size=page_size,
             results=[ServiceListingResponse.model_validate(r) for r in results],
         )
 
@@ -309,6 +420,7 @@ class ServiceListingService:
         radius_km: float = 10.0,
         status: Optional[str] = "active",
         category_id: Optional[uuid.UUID] = None,
+        exclude_seller_id: Optional[uuid.UUID] = None,
         is_negotiable: Optional[bool] = None,
         price_type: Optional[str] = None,
         min_price: Optional[Decimal] = None,
@@ -330,6 +442,7 @@ class ServiceListingService:
             radius_km=radius_km,
             status=status,
             category_id=category_id,
+            exclude_seller_id=exclude_seller_id,
             is_negotiable=is_negotiable,
             price_type=price_type,
             min_price=min_price,
@@ -354,7 +467,7 @@ class ServiceListingService:
         return ServiceListingNearbyListResponse(
             total=total,
             page=page,
-            pageSize=page_size,
+            page_size=page_size,
             radius_km=radius_km,
             results=items,
         )
@@ -380,19 +493,14 @@ class ServiceListingService:
         """
         Same as search_nearby but reads lat/lng from the user's
         profile.last_location_point automatically.
-        Raises 404 if profile not found, 400 if location not set.
         """
         profile = ProfileRepository(db).get_by_user_id(user_id)
         if not profile:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Profile not found. Create a profile first.",
-            )
+            raise UserProfileNotFoundError()
+            
         if profile.last_location_point is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No location saved on your profile. Update your location first via PATCH /profile/me/location",
-            )
+            raise ProfileLocationMissingError()
+            
         # Convert PostGIS WKBElement → lat/lng
         shape = to_shape(profile.last_location_point)
         return self.search_nearby(
@@ -401,6 +509,7 @@ class ServiceListingService:
             radius_km=radius_km,
             status=status,
             category_id=category_id,
+            exclude_seller_id=user_id,
             is_negotiable=is_negotiable,
             price_type=price_type,
             min_price=min_price,

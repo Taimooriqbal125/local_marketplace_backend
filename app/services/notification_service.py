@@ -11,8 +11,19 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.repositories.notification_repo import NotificationRepository
-from app.schemas.notification import NotificationCreate, NotificationUpdate
+from app.schemas.notification import NotificationCreate
+from app.models.notification import Notification
 from app.websocket import manager
+
+
+class NotificationNotFoundError(HTTPException):
+    def __init__(self, detail: str = "Notification not found"):
+        super().__init__(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
+
+
+class NotificationForbiddenError(HTTPException):
+    def __init__(self, detail: str = "You are not authorized to access this notification"):
+        super().__init__(status_code=status.HTTP_403_FORBIDDEN, detail=detail)
 
 
 class NotificationService:
@@ -22,6 +33,17 @@ class NotificationService:
         self.db = db
         self.repo = NotificationRepository(db)
 
+    def _get_notification_or_404(self, notification_id: uuid.UUID, current_user_id: uuid.UUID) -> Notification:
+        """Internal helper to fetch and enforce possession of a notification."""
+        notification = self.repo.get(notification_id)
+        if not notification:
+            raise NotificationNotFoundError()
+
+        if notification.userId != current_user_id:
+            raise NotificationForbiddenError()
+            
+        return notification
+
     def list_notifications(
         self, 
         user_id: uuid.UUID, 
@@ -29,38 +51,22 @@ class NotificationService:
         skip: int = 0, 
         limit: int = 20
     ):
-        """
-        Fetch notifications for a user.
-        Can be filtered to show only unread ones.
-        """
+        """Fetch notifications optionally filtered by read status."""
         if only_unread:
             return self.repo.get_unread_by_user(user_id, skip=skip, limit=limit)
         return self.repo.get_all_by_user(user_id, skip=skip, limit=limit)
 
+    def get_notification_by_id(self, notification_id: uuid.UUID, current_user_id: uuid.UUID):
+        """Fetch a single notification enforcing ownership."""
+        return self._get_notification_or_404(notification_id, current_user_id)
+
     def mark_as_read(self, notification_id: uuid.UUID, current_user_id: uuid.UUID):
-        """
-        Mark a notification as read.
-        Enforces ownership check so users can only mark their own notifications.
-        """
-        notification = self.repo.get(notification_id)
-        if not notification:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Notification not found",
-            )
-        
-        if notification.userId != current_user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You are not authorized to access this notification",
-            )
-        
+        """Mark a specific notification as read."""
+        notification = self._get_notification_or_404(notification_id, current_user_id)
         return self.repo.mark_as_read(notification)
 
     def mark_all_as_read(self, current_user_id: uuid.UUID):
-        """
-        Mark all unread notifications for a user as read.
-        """
+        """Mark all unread notifications for a user as read."""
         return self.repo.mark_all_as_read(current_user_id)
 
     async def send_notification(
@@ -74,26 +80,24 @@ class NotificationService:
         listing_id: Optional[uuid.UUID | str] = None
     ):
         """
-        Create and send a notification to a specific user.
-        This handles both database persistence and real-time triggers.
+        Create and persist a notification, then broadcast sequentially over WebSocket.
         """
-        # Ensure user_id is a UUID object
         if isinstance(user_id, str):
             user_id = uuid.UUID(user_id)
         
-        # 1. Persist to Database
+        # Persist to Database with Pydantic properties using native snake_case format
         obj_in = NotificationCreate(
-            userId=user_id,
-            senderId=sender_id,
-            orderId=order_id,
-            listingId=listing_id,
+            user_id=user_id,
+            sender_id=sender_id,
+            order_id=order_id,
+            listing_id=listing_id,
             type=type,
             title=title,
             body=body
         )
         notification = self.repo.create(obj_in)
 
-        # 2. Real-time broadcast via WebSocket
+        # Real-time broadcast
         await manager.send_personal_message(
             user_id=user_id,
             message={
@@ -104,7 +108,7 @@ class NotificationService:
                     "title": notification.title,
                     "body": notification.body,
                     "isRead": notification.isRead,
-                    "createdAt": notification.createdAt.isoformat()
+                    "createdAt": notification.created_at.isoformat()
                 }
             }
         )
@@ -112,27 +116,13 @@ class NotificationService:
         return notification
 
     def delete_notification(self, notification_id: uuid.UUID, current_user_id: uuid.UUID):
-        """Delete a single notification with ownership enforcement."""
-        notification = self.repo.get(notification_id)
-        if not notification:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Notification not found",
-            )
-        
-        if notification.userId != current_user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You are not authorized to delete this notification",
-            )
-        
+        """Permanently delete a notification enforcing ownership."""
+        notification = self._get_notification_or_404(notification_id, current_user_id)
         self.repo.delete(notification)
         return {"message": "Notification deleted successfully"}
 
     def cleanup_expired_notifications(self, read_days: int = 60, unread_days: int = 180):
-        """
-        Triggers cleanup of old notifications based on retention rules.
-        """
+        """Trigger cleanup of old notifications based on retention period rules."""
         deleted_count = self.repo.delete_expired_notifications(
             read_days=read_days, 
             unread_days=unread_days

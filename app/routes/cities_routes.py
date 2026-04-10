@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 from app.services.cities_service import CityService
 from app.schemas.cities import CityCreate, CityUpdate, CityOut
@@ -12,24 +12,15 @@ router = APIRouter(prefix="/cities", tags=["cities"])
 
 @router.get("/", response_model=List[CityOut])
 def list_cities(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-	service = CityService(db)
-	return service.list_cities(skip=skip, limit=limit)
+	return CityService(db).list_cities(skip=skip, limit=limit)
 
 @router.get("/{city_id}", response_model=CityOut)
 def get_city(city_id: uuid.UUID, db: Session = Depends(get_db)):
-	service = CityService(db)
-	city = service.get_city(city_id)
-	if not city:
-		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="City not found")
-	return city
+	return CityService(db).get_city(city_id)
 
 @router.get("/slug/{slug}", response_model=CityOut)
 def get_city_by_slug(slug: str, db: Session = Depends(get_db)):
-	service = CityService(db)
-	city = service.get_city_by_slug(slug)
-	if not city:
-		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="City not found")
-	return city
+	return CityService(db).get_city_by_slug(slug)
 
 @router.post("/", response_model=CityOut, status_code=status.HTTP_201_CREATED)
 def create_city(
@@ -37,8 +28,7 @@ def create_city(
 	db: Session = Depends(get_db),
 	_: User = Depends(get_current_admin_user),
 ):
-	service = CityService(db)
-	return service.create_city(obj_in)
+	return CityService(db).create_city(obj_in)
 
 @router.patch("/{city_id}", response_model=CityOut)
 def update_city(
@@ -47,11 +37,7 @@ def update_city(
 	db: Session = Depends(get_db),
 	_: User = Depends(get_current_admin_user),
 ):
-	service = CityService(db)
-	city = service.update_city(city_id, obj_in)
-	if not city:
-		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="City not found")
-	return city
+	return CityService(db).update_city(city_id, obj_in)
 
 @router.delete("/{city_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_city(
@@ -59,8 +45,4 @@ def delete_city(
 	db: Session = Depends(get_db),
 	_: User = Depends(get_current_admin_user),
 ):
-	service = CityService(db)
-	success = service.delete_city(city_id)
-	if not success:
-		raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="City not found")
-	return None
+	return CityService(db).delete_city(city_id)

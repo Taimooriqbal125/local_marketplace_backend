@@ -6,7 +6,9 @@ from datetime import datetime
 from typing import List, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import Field, model_validator
+
+from .base import BaseSchema
 
 
 # ---------------------------------------------------------------------------
@@ -18,10 +20,10 @@ OrderStatus = Literal["requested", "accepted", "completed", "cancelled", "disput
 # ---------------------------------------------------------------------------
 # Base — shared fields for Create / Update / Response
 # ---------------------------------------------------------------------------
-class OrderBase(BaseModel):
+class OrderBase(BaseSchema):
     """Fields shared across all Order schema variants."""
 
-    proposedPrice: int = Field(..., gt=0, description="Initial price offered by the buyer")
+    proposed_price: int = Field(..., gt=0, description="Initial price offered by the buyer")
     notes: Optional[str] = Field(default=None, description="Extra info provided by the buyer")
 
 
@@ -31,245 +33,243 @@ class OrderBase(BaseModel):
 class OrderCreate(OrderBase):
     """Payload for POST /orders."""
 
-    listingId: UUID = Field(..., description="The ID of the service listing being ordered")
+    listing_id: UUID = Field(..., description="The ID of the service listing being ordered")
 
 
 # ---------------------------------------------------------------------------
-# Update — PATCH payload (all fields optional)
+# Update — PATCH payload
 # ---------------------------------------------------------------------------
-class OrderUpdate(BaseModel):
+class OrderUpdate(BaseSchema):
     """
     Payload for PATCH /orders/{id}.
     Used by sellers to accept/complete and buyers to cancel/confirm.
     """
 
     status: Optional[OrderStatus] = None
-    agreedPrice: Optional[int] = Field(default=None, gt=0)
+    agreed_price: Optional[int] = Field(default=None, gt=0)
     notes: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
 # Response — what the API returns
 # ---------------------------------------------------------------------------
-class OrderResponse(BaseModel):
+class OrderResponse(BaseSchema):
     """Full order object returned by the API."""
 
     id: UUID
-    listingId: UUID
-    buyerId: UUID
-    sellerId: UUID
+    listing_id: UUID
+    buyer_id: UUID
+    seller_id: UUID
     status: OrderStatus
     
-    # Payload fields
-    proposedPrice: int
-    agreedPrice: Optional[int] = None
+    # Pricing fields
+    proposed_price: int
+    agreed_price: Optional[int] = None
     notes: Optional[str] = None
     
     # Timestamps
-    acceptedAt: Optional[datetime] = None
-    sellerCompletedAt: Optional[datetime] = None
-    buyerCompletedAt: Optional[datetime] = None
-    createdAt: datetime
-    updatedAt: datetime
+    accepted_at: Optional[datetime] = None
+    seller_completed_at: Optional[datetime] = None
+    buyer_completed_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
 
-    model_config = dict(from_attributes=True)
-
-
-# ---------------------------------------------------------------------------
-# /orders/me/as-seller — what a seller sees in their dashboard
-# ---------------------------------------------------------------------------
-class OrderAsSellerResponse(BaseModel):
-    """
-    Order response for the seller's dashboard.
-    Shows who is requesting their service.
-    """
-
-    id: UUID
-    status: OrderStatus
-    createdAt: datetime
-
-    # Buyer info (who's requesting)
-    buyerName: str
-    buyerPhotoUrl: Optional[str] = None
-
-    # Service context
-    serviceName: str
-    imageUrl: Optional[str] = None
-    categoryName: str
+    # Context fields (Populated via validator)
+    service_name: str
+    image_url: Optional[str] = None
+    seller_name: str
 
     @model_validator(mode="before")
     @classmethod
     def map_relationships(cls, data: any) -> any:
-        """Extract buyer profile, seller profile (for count), and service info."""
-        if not hasattr(data, "buyer") or not hasattr(data, "seller"):
+        """Attach listing and seller context while preserving the base order fields."""
+        if isinstance(data, dict):
             return data
 
-        buyer_name = "Unknown"
-        buyer_photo = None
-        if data.buyer and data.buyer.profile:
-            buyer_name = data.buyer.profile.name
-            buyer_photo = data.buyer.profile.photoUrl
-
-
         service_name = "Unknown Service"
         service_image = None
-        category_name = "Other"
-        if data.listing:
-            service_name = data.listing.title
-            if data.listing.category:
-                category_name = data.listing.category.name
+        seller_name = "Unknown"
+
+        if hasattr(data, "listing") and data.listing:
+            service_name = data.listing.title or "Unknown Service"
             if data.listing.media:
-                service_image = data.listing.media[0].imageUrl
+                service_image = data.listing.media[0].image_url
 
-        return {
-            "id": data.id,
-            "status": data.status,
-            "createdAt": data.createdAt,
-            "buyerName": buyer_name,
-            "buyerPhotoUrl": buyer_photo,
-            "serviceName": service_name,
-            "imageUrl": service_image,
-            "categoryName": category_name,
-        }
+        if hasattr(data, "seller") and data.seller and data.seller.profile:
+            seller_name = data.seller.profile.name or "Unknown"
 
-    model_config = dict(from_attributes=True)
-
-
-class SellerOrdersResponse(BaseModel):
-    """
-    Wrapped response for the seller's dashboard.
-    Includes total completed orders count for the seller.
-    """
-    totalOrders: int
-    orders: List[OrderAsSellerResponse]
-
-    model_config = dict(from_attributes=True)
+        # Map ORM attributes into dict for Pydantic
+        result = {k: v for k, v in data.__dict__.items() if not k.startswith('_')}
+        result.update({
+            "service_name": service_name,
+            "image_url": service_image,
+            "seller_name": seller_name,
+        })
+        return result
 
 
 # ---------------------------------------------------------------------------
-# /orders/me/as-buyer — what a buyer sees in their dashboard
+# Dashboard Responses (Seller/Buyer)
 # ---------------------------------------------------------------------------
-class OrderAsBuyerResponse(BaseModel):
+class OrderAsSellerResponse(BaseSchema):
     """
-    Order response for the buyer's dashboard.
-    Shows the services ordered by the user.
+    Order response optimized for the seller's dashboard view.
     """
-
     id: UUID
-    createdAt: datetime
+    status: OrderStatus
+    created_at: datetime
+    proposed_price: int
+    seller_completed_at: Optional[datetime] = None
+    buyer_completed_at: Optional[datetime] = None
+
+    # Buyer info
+    buyer_name: str
+    buyer_phone: Optional[str] = None
 
     # Service context
-    serviceName: str
-    imageUrl: Optional[str] = None
-    categoryName: str
-
-    # Seller info
-    sellerName: str
-    sellerPhotoUrl: Optional[str] = None
-    sellerPhone: Optional[str] = None
+    service_name: str
+    image_url: Optional[str] = None
+    service_price: float
 
     @model_validator(mode="before")
     @classmethod
-    def map_relationships(cls, data: any) -> any:
-        """Extract service info and seller contact details."""
+    def map_seller_view(cls, data: any) -> any:
+        if isinstance(data, dict): return data
+
+        buyer_name = "Unknown"
+        buyer_phone = data.buyer.phone if data.buyer else None
+        if data.buyer and data.buyer.profile:
+            buyer_name = data.buyer.profile.name
+
         service_name = "Unknown Service"
         service_image = None
-        category_name = "Other"
-        
+        service_price = 0.0
         if data.listing:
             service_name = data.listing.title
-            if data.listing.category:
-                category_name = data.listing.category.name
+            service_price = float(data.listing.price_amount or 0)
             if data.listing.media:
-                service_image = data.listing.media[0].imageUrl
+                service_image = data.listing.media[0].image_url
+
+        result = {k: v for k, v in data.__dict__.items() if not k.startswith('_')}
+        result.update({
+            "buyer_name": buyer_name,
+            "buyer_phone": buyer_phone,
+            "service_name": service_name,
+            "image_url": service_image,
+            "service_price": service_price,
+        })
+        return result
+
+
+class SellerOrdersResponse(BaseSchema):
+    """Wrapped response for the seller's dashboard with aggregates."""
+    total_orders: int
+    orders: List[OrderAsSellerResponse]
+
+
+class OrderAsBuyerResponse(BaseSchema):
+    """
+    Order response optimized for the buyer's dashboard view.
+    """
+    id: UUID
+    status: OrderStatus
+    created_at: datetime
+    agreed_price: Optional[int] = None
+    seller_completed_at: Optional[datetime] = None
+    buyer_completed_at: Optional[datetime] = None
+
+    # Service context
+    service_name: str
+    image_url: Optional[str] = None
+    service_price: float
+
+    # Seller info
+    seller_name: str
+    seller_phone: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_buyer_view(cls, data: any) -> any:
+        if isinstance(data, dict): return data
+
+        service_name = "Unknown Service"
+        service_image = None
+        service_price = 0.0
+        if data.listing:
+            service_name = data.listing.title
+            service_price = float(data.listing.price_amount or 0)
+            if data.listing.media:
+                service_image = data.listing.media[0].image_url
 
         seller_name = "Unknown"
-        seller_photo = None
-        seller_phone = None
-        if data.seller:
-            seller_phone = data.seller.phone
-            if data.seller.profile:
-                seller_name = data.seller.profile.name
-                seller_photo = data.seller.profile.photoUrl
+        seller_phone = data.seller.phone if data.seller else None
+        if data.seller and data.seller.profile:
+            seller_name = data.seller.profile.name
 
-        return {
-            "id": data.id,
-            "createdAt": data.createdAt,
-            "serviceName": service_name,
-            "imageUrl": service_image,
-            "categoryName": category_name,
-            "sellerName": seller_name,
-            "sellerPhotoUrl": seller_photo,
-            "sellerPhone": seller_phone,
-        }
-
-    model_config = dict(from_attributes=True)
-
+        result = {k: v for k, v in data.__dict__.items() if not k.startswith('_')}
+        result.update({
+            "service_name": service_name,
+            "image_url": service_image,
+            "service_price": service_price,
+            "seller_name": seller_name,
+            "seller_phone": seller_phone,
+        })
+        return result
 
 
 # ---------------------------------------------------------------------------
 # OrderDetailResponse — used by PATCH and general GET
 # ---------------------------------------------------------------------------
-class OrderDetailResponse(BaseModel):
+class OrderDetailResponse(BaseSchema):
     """
-    Unified detailed order response for both buyer and seller.
-    Includes full service context, pricing, and contact info.
+    Unified detailed order response including full context and contact info.
     """
-
     id: UUID
     status: OrderStatus
-    proposedPrice: int
-    agreedPrice: Optional[int] = None
+    proposed_price: int
+    agreed_price: Optional[int] = None
     notes: Optional[str] = None
     
     # Timestamps
-    createdAt: datetime
-    acceptedAt: Optional[datetime] = None
-    sellerCompletedAt: Optional[datetime] = None
-    buyerCompletedAt: Optional[datetime] = None
-    updatedAt: datetime
+    created_at: datetime
+    accepted_at: Optional[datetime] = None
+    seller_completed_at: Optional[datetime] = None
+    buyer_completed_at: Optional[datetime] = None
+    updated_at: datetime
 
     # Service context
-    serviceName: str
-    imageUrl: Optional[str] = None
-    categoryName: str
-    priceType: str
-    listingPrice: float  # The price at the time of listing
+    service_name: str
+    image_url: Optional[str] = None
+    category_name: str
+    price_type: str
+    listing_price: float
 
     # Seller info
-    sellerName: str
-    sellerPhotoUrl: Optional[str] = None
-    sellerPhone: Optional[str] = None
+    seller_name: str
+    seller_photo_url: Optional[str] = None
+    seller_phone: Optional[str] = None
 
     # Buyer info
-    buyerName: str
-    buyerPhotoUrl: Optional[str] = None
-    buyerPhone: Optional[str] = None
+    buyer_name: str
+    buyer_photo_url: Optional[str] = None
+    buyer_phone: Optional[str] = None
 
     @model_validator(mode="before")
     @classmethod
-    def map_relationships(cls, data: any) -> any:
-        """Map listing, seller, and buyer data into a unified detail view."""
-        if not hasattr(data, "seller") or not hasattr(data, "buyer") or not hasattr(data, "listing"):
-            return data
+    def map_detail_relationships(cls, data: any) -> any:
+        if isinstance(data, dict): return data
 
-        # Seller mapping
-        seller_name = "Unknown"
-        seller_photo = None
+        # Seller
+        seller_name = data.seller.profile.name if data.seller and data.seller.profile else "Unknown"
+        seller_photo = data.seller.profile.photo_url if data.seller and data.seller.profile else None
         seller_phone = data.seller.phone if data.seller else None
-        if data.seller and data.seller.profile:
-            seller_name = data.seller.profile.name
-            seller_photo = data.seller.profile.photoUrl
 
-        # Buyer mapping
-        buyer_name = "Unknown"
-        buyer_photo = None
+        # Buyer
+        buyer_name = data.buyer.profile.name if data.buyer and data.buyer.profile else "Unknown"
+        buyer_photo = data.buyer.profile.photo_url if data.buyer and data.buyer.profile else None
         buyer_phone = data.buyer.phone if data.buyer else None
-        if data.buyer and data.buyer.profile:
-            buyer_name = data.buyer.profile.name
-            buyer_photo = data.buyer.profile.photoUrl
 
-        # Listing mapping
+        # Listing
         service_name = "Unknown Service"
         service_image = None
         category_name = "Other"
@@ -278,35 +278,31 @@ class OrderDetailResponse(BaseModel):
 
         if data.listing:
             service_name = data.listing.title
-            price_type = data.listing.priceType
-            listing_price = float(data.listing.priceAmount or 0)
+            price_type = data.listing.price_type
+            listing_price = float(data.listing.price_amount or 0)
             if data.listing.category:
                 category_name = data.listing.category.name
             if data.listing.media:
-                service_image = data.listing.media[0].imageUrl
+                service_image = data.listing.media[0].image_url
 
-        return {
-            "id": data.id,
-            "status": data.status,
-            "proposedPrice": data.proposedPrice,
-            "agreedPrice": data.agreedPrice,
-            "notes": data.notes,
-            "createdAt": data.createdAt,
-            "acceptedAt": data.acceptedAt,
-            "sellerCompletedAt": data.sellerCompletedAt,
-            "buyerCompletedAt": data.buyerCompletedAt,
-            "updatedAt": data.updatedAt,
-            "serviceName": service_name,
-            "imageUrl": service_image,
-            "categoryName": category_name,
-            "priceType": price_type,
-            "listingPrice": listing_price,
-            "sellerName": seller_name,
-            "sellerPhotoUrl": seller_photo,
-            "sellerPhone": seller_phone,
-            "buyerName": buyer_name,
-            "buyerPhotoUrl": buyer_photo,
-            "buyerPhone": buyer_phone,
-        }
+        result = {k: v for k, v in data.__dict__.items() if not k.startswith('_')}
+        result.update({
+            "service_name": service_name,
+            "image_url": service_image,
+            "category_name": category_name,
+            "price_type": price_type,
+            "listing_price": listing_price,
+            "seller_name": seller_name,
+            "seller_photo_url": seller_photo,
+            "seller_phone": seller_phone,
+            "buyer_name": buyer_name,
+            "buyer_photo_url": buyer_photo,
+            "buyer_phone": buyer_phone,
+        })
+        return result
 
-    model_config = dict(from_attributes=True)
+
+class OrderCancelResponse(BaseSchema):
+    """Response payload for cancel-request endpoint."""
+    message: str
+    order_id: UUID

@@ -1,13 +1,13 @@
 import uuid
-from typing import Optional
 from datetime import datetime
+from typing import Optional, TYPE_CHECKING
 
 from sqlalchemy import String, Text, Boolean, ForeignKey, DateTime, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.sql import func
 
-from app.db.base_class import Base
+from app.db.base_class import Base, TimestampMixin
+
 
 class NotificationType:
     """Constants for notification types."""
@@ -20,14 +20,35 @@ class NotificationType:
     REVIEW_RECEIVED = "review_received"
 
 
-class Notification(Base):
+if TYPE_CHECKING:
+    from .user import User
+    from .order import Order
+    from .service_listing import ServiceListing
+
+
+class Notification(Base, TimestampMixin):
     """
-    Model representing a notification for a user.
+    Model representing an in-app notification for a user.
+    Alerts users about order status changes, reviews, or system updates.
+
+    Attributes:
+        id (uuid.UUID): Primary key.
+        userId (uuid.UUID): Receiver of the notification.
+        senderId (uuid.UUID): User who triggered the event (optional).
+        orderId (uuid.UUID): Related order (optional).
+        listingId (uuid.UUID): Related listing (optional).
+        type (str): Category of notification (see NotificationType).
+        title (str): Summary text.
+        body (str): Detailed message.
+        isRead (bool): Read status.
+        readAt (datetime): Timestamp of when the notification was opened.
+        created_at (datetime): From TimestampMixin.
+        updated_at (datetime): From TimestampMixin.
     """
+
     __tablename__ = "notifications"
 
-    # Notification Types (Legacy constants for backward compatibility if needed, 
-    # but preferred to use NotificationType class directly)
+    # Type Constants Constants (Preserved for legacy code compatibility)
     TYPE_ORDER_REQUESTED = NotificationType.ORDER_REQUESTED
     TYPE_ORDER_ACCEPTED = NotificationType.ORDER_ACCEPTED
     TYPE_BUYER_MARKED_COMPLETED = NotificationType.BUYER_MARKED_COMPLETED
@@ -35,95 +56,99 @@ class Notification(Base):
     TYPE_ORDER_CANCELLED = NotificationType.ORDER_CANCELLED
     TYPE_REVIEW_RECEIVED = NotificationType.REVIEW_RECEIVED
 
-    # ── Primary Key ──────────────────────────────────────────────────────────
+    # Primary Key
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         primary_key=True,
         default=uuid.uuid4,
-        index=True
+        index=True,
+        doc="Unique identifier for the notification."
     )
 
-    # ── Foreign Keys ─────────────────────────────────────────────────────────
-    
-    # userId: The user who receives the notification
+    # Foreign Keys (CamelCase preserved for compatibility)
     userId: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
-        index=True
+        index=True,
+        doc="The recipient user ID."
     )
-
-    # senderId: The user who triggered the notification (Optional)
     senderId: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
-        index=True
+        index=True,
+        doc="The user who triggered this notification."
     )
-
-    # orderId: Related order (Optional)
     orderId: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("orders.id", ondelete="CASCADE"),
         nullable=True,
-        index=True
+        index=True,
+        doc="Reference to the associated order."
     )
-
-    # listingId: Related service listing (Optional)
     listingId: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("service_listings.id", ondelete="CASCADE"),
         nullable=True,
-        index=True
+        index=True,
+        doc="Reference to the associated service listing."
     )
 
-    # ── Core Fields ──────────────────────────────────────────────────────────
-
-    type: Mapped[str] = mapped_column(String(50), nullable=False)
-    title: Mapped[str] = mapped_column(String(255), nullable=False)
-    body: Mapped[str] = mapped_column(Text, nullable=False)
+    # Content
+    type: Mapped[str] = mapped_column(
+        String(50), 
+        nullable=False,
+        doc="Categorical type of the notification."
+    )
+    title: Mapped[str] = mapped_column(
+        String(255), 
+        nullable=False,
+        doc="Short title or subject."
+    )
+    body: Mapped[str] = mapped_column(
+        Text, 
+        nullable=False,
+        doc="Detailed notification content."
+    )
     
     isRead: Mapped[bool] = mapped_column(
         Boolean, 
         nullable=False, 
-        server_default=text("false")
+        server_default=text("false"),
+        doc="True if the user has read the notification."
     )
 
-    # ── Timestamps ────────────────────────────────────────────────────────────
-    
+    # Lifecycle tracking
     readAt: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), 
-        nullable=True
+        nullable=True,
+        doc="Record of exactly when the user opened the notification."
     )
 
-    createdAt: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now()
-    )
-
-    # ── Relationships ─────────────────────────────────────────────────────────
-    
-    # The user receiving the notification
+    # Relationships
     user: Mapped["User"] = relationship(
         "User", 
         foreign_keys=[userId], 
-        back_populates="notifications_received"
+        back_populates="notifications_received",
+        doc="The recipient user object."
     )
-
-    # The user who triggered the notification
     sender: Mapped[Optional["User"]] = relationship(
         "User", 
         foreign_keys=[senderId], 
-        back_populates="notifications_sent"
+        back_populates="notifications_sent",
+        doc="The user who sent/triggered the notification."
     )
-
     order: Mapped[Optional["Order"]] = relationship(
         "Order", 
-        back_populates="notifications"
+        back_populates="notifications",
+        doc="Access to related order details."
     )
-
     listing: Mapped[Optional["ServiceListing"]] = relationship(
         "ServiceListing",
-        back_populates="notifications"
+        back_populates="notifications",
+        doc="Access to related service listing details."
     )
+
+    def __repr__(self) -> str:
+        return f"<Notification(id={self.id}, type='{self.type}', userId={self.userId}, isRead={self.isRead})>"

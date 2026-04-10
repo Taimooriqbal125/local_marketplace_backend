@@ -65,6 +65,11 @@ def get_my_profile(
     current_user: User = Depends(get_current_user)
 ):
     """Retrieve the authenticated user's profile and key metrics."""
+    if not hasattr(current_user, "profile") or not current_user.profile:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Profile not found. You need to create a profile first."
+        )
     return current_user
 
 

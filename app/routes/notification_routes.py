@@ -3,7 +3,7 @@ Notification Routes — API endpoints for user notifications.
 """
 
 import uuid
-from typing import List, Optional
+from typing import List
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
@@ -19,7 +19,6 @@ router = APIRouter(
     tags=["Notifications"],
 )
 
-
 @router.get("/", response_model=List[NotificationListResponse])
 def list_notifications(
     only_unread: bool = Query(False, description="Filter for unread notifications only"),
@@ -31,14 +30,12 @@ def list_notifications(
     """
     Retrieve notifications for the current authenticated user.
     """
-    service = NotificationService(db)
-    return service.list_notifications(
+    return NotificationService(db).list_notifications(
         user_id=current_user.id, 
         only_unread=only_unread, 
         skip=skip, 
         limit=limit
     )
-
 
 @router.patch("/mark-all-as-read", response_model=List[NotificationMarkReadResponse])
 def mark_all_as_read(
@@ -48,9 +45,18 @@ def mark_all_as_read(
     """
     Mark all unread notifications for the current user as read.
     """
-    service = NotificationService(db)
-    return service.mark_all_as_read(current_user_id=current_user.id)
+    return NotificationService(db).mark_all_as_read(current_user_id=current_user.id)
 
+@router.get("/{notification_id}", response_model=NotificationResponse)
+def get_notification_by_id(
+    notification_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(security.get_current_user),
+):
+    """
+    Retrieve a specific notification by ID for the current authenticated user.
+    """
+    return NotificationService(db).get_notification_by_id(notification_id, current_user_id=current_user.id)
 
 @router.patch("/{notification_id}", response_model=NotificationMarkReadResponse)
 def mark_as_read(
@@ -61,9 +67,7 @@ def mark_as_read(
     """
     Mark a specific notification as read.
     """
-    service = NotificationService(db)
-    return service.mark_as_read(notification_id, current_user_id=current_user.id)
-
+    return NotificationService(db).mark_as_read(notification_id, current_user_id=current_user.id)
 
 @router.delete("/{notification_id}", status_code=status.HTTP_200_OK)
 def delete_notification(
@@ -74,5 +78,4 @@ def delete_notification(
     """
     Delete a specific notification record.
     """
-    service = NotificationService(db)
-    return service.delete_notification(notification_id, current_user_id=current_user.id)
+    return NotificationService(db).delete_notification(notification_id, current_user_id=current_user.id)

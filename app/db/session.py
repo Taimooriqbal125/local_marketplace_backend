@@ -15,11 +15,17 @@ from typing import Generator
 from app.core.config import settings
 
 # ---------- Engine ----------
+# Neon requires SSL. We enforce it here to prevent 'SSL SYSCALL error: EOF detected'.
+connect_args = {}
+if "neon.tech" in settings.DATABASE_URL:
+    connect_args["sslmode"] = "require"
+
 engine = create_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,   # detect dropped connections automatically
     pool_size=10,
     max_overflow=20,
+    connect_args=connect_args,
 )
 
 # ---------- Session Factory ----------

@@ -1,10 +1,13 @@
 """
-User Repository — the *only* layer that talks to the database.
+User Repository — handles direct database operations for the User model.
 """
 
 import uuid
-from sqlalchemy.orm import Session
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from app.models.user import User
 
@@ -17,15 +20,18 @@ class UserRepository:
 
     def get(self, user_id: uuid.UUID) -> Optional[User]:
         """Fetch a single user by primary key."""
-        return self.db.query(User).filter(User.id == user_id).first()
+        stmt = select(User).where(User.id == user_id)
+        return self.db.execute(stmt).scalar_one_or_none()
 
     def get_by_email(self, email: str) -> Optional[User]:
         """Fetch a single user by email."""
-        return self.db.query(User).filter(User.email == email).first()
+        stmt = select(User).where(User.email == email)
+        return self.db.execute(stmt).scalar_one_or_none()
 
     def get_by_phone(self, phone: str) -> Optional[User]:
         """Fetch a single user by phone number."""
-        return self.db.query(User).filter(User.phone == phone).first()
+        stmt = select(User).where(User.phone == phone)
+        return self.db.execute(stmt).scalar_one_or_none()
 
     def get_all(
         self,
@@ -35,12 +41,14 @@ class UserRepository:
         is_admin: Optional[bool] = None,
     ) -> List[User]:
         """Return a paginated and optionally filtered list of users."""
-        query = self.db.query(User)
+        stmt = select(User)
         if is_active is not None:
-            query = query.filter(User.is_active == is_active)
+            stmt = stmt.where(User.is_active == is_active)
         if is_admin is not None:
-            query = query.filter(User.is_admin == is_admin)
-        return query.offset(skip).limit(limit).all()
+            stmt = stmt.where(User.is_admin == is_admin)
+            
+        stmt = stmt.offset(skip).limit(limit)
+        return list(self.db.execute(stmt).scalars().all())
 
     def create(self, user: User) -> User:
         """Insert a new user into the database."""
@@ -55,6 +63,26 @@ class UserRepository:
             setattr(db_user, key, value)
         self.db.commit()
         self.db.refresh(db_user)
+        return db_user
+
+    def touch_last_active_if_stale(
+        self,
+        db_user: User,
+        min_interval: timedelta = timedelta(minutes=5),
+    ) -> User:
+        """Update last_active_at only when it's older than the interval (or missing)."""
+        now_utc = datetime.now(timezone.utc)
+        last_active = db_user.last_active_at
+
+        if last_active is not None and last_active.tzinfo is None:
+            # Defensively treat naive timestamps as UTC.
+            last_active = last_active.replace(tzinfo=timezone.utc)
+
+        if last_active is None or (now_utc - last_active) > min_interval:
+            db_user.last_active_at = now_utc
+            self.db.commit()
+            self.db.refresh(db_user)
+
         return db_user
 
     def delete(self, db_user: User) -> None:

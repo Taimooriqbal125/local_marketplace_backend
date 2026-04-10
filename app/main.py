@@ -12,6 +12,9 @@ Run with:  uvicorn app.main:app --reload
 from fastapi import FastAPI
 from app.db.init_db import init_db
 from app.routes import api_router
+from app.core.logging import logger
+from app.core.rate_limiter import init_rate_limiter
+from app.core.redis import close_redis_connection, test_redis_connection
 
 # ---------- Create the app ----------
 app = FastAPI(
@@ -25,14 +28,27 @@ from app.core import tasks
 
 # ---------- Startup event ----------
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
     """Runs once when the server starts — creates DB tables if they don't exist."""
     init_db()
+
+    redis_ok = await test_redis_connection()
+    if not redis_ok:
+        logger.error("Redis startup health check failed")
+
+    await init_rate_limiter()
+
     # Start background scheduler
     try:
         tasks.start_scheduler()
     except Exception as e:
-        print(f"[ERROR] Failed to start scheduler: {e}")
+        logger.error("Failed to start scheduler", error=str(e))
+
+
+@app.on_event("shutdown")
+async def on_shutdown():
+    """Runs once on shutdown to close external resources cleanly."""
+    await close_redis_connection()
 
 
 # ---------- Register routers ----------

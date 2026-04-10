@@ -5,90 +5,97 @@ from decimal import Decimal
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator, model_validator
 from geoalchemy2.elements import WKBElement
 from geoalchemy2.shape import to_shape
+from pydantic import Field, field_validator, model_validator
+
+from .base import BaseSchema
 
 
+class LocationPoint(BaseSchema):
+    """
+    Helper schema for Latitude/Longitude points.
+    Used for both input and output of geographic data.
+    """
+    latitude: float = Field(..., ge=-90, le=90, description="GPS Latitude (-90 to 90)")
+    longitude: float = Field(..., ge=-180, le=180, description="GPS Longitude (-180 to 180)")
 
-class LocationPoint(BaseModel):
-    """Helper schema for Latitude/Longitude points."""
-    latitude: float = Field(..., ge=-90, le=90)
-    longitude: float = Field(..., ge=-180, le=180)
 
-
-class ProfileBase(BaseModel):
-    """Shared profile fields used in create/update/response schemas."""
-
-    name: str = Field(min_length=1, max_length=100)
-    bio: Optional[str] = None
-    photoUrl: Optional[str] = Field(default=None, max_length=500)
-    cloudinary_public_id: Optional[str] = Field(default=None, max_length=500)
-    sellerStatus: Literal["none", "active", "suspended"] = "none"
-    sellerCompletedOrdersCount: Optional[int] = 0
+class ProfileBase(BaseSchema):
+    """
+    Shared profile fields used across create, update, and response schemas.
+    """
+    name: str = Field(..., min_length=1, max_length=100, description="User's full name or display name")
+    bio: Optional[str] = Field(default=None, max_length=1000, description="Short biography of the user")
+    photo_url: Optional[str] = Field(default=None, max_length=500, description="URL of the profile photo")
+    cloudinary_public_id: Optional[str] = Field(default=None, max_length=500, description="ID for Cloudinary storage")
+    seller_status: Literal["none", "active", "suspended"] = Field(default="active", description="Current status of the seller")
+    seller_completed_orders_count: int = Field(default=0, ge=0, description="Total number of successfully completed orders")
     
-    # New Location Fields
-    last_location_point: Optional[LocationPoint] = None
-    last_location_at: Optional[datetime] = None
-    last_location_accuracy_m: Optional[int] = Field(default=None, ge=0)
-    last_location_source: Optional[str] = Field(default=None, max_length=20)
-    default_location_point: Optional[LocationPoint] = None
-    location_tracking_enabled: bool = False
+    # Location tracking attributes
+    last_location_point: Optional[LocationPoint] = Field(default=None, description="Most recent GPS coordinates")
+    last_location_at: Optional[datetime] = Field(default=None, description="Timestamp of the last location update")
+    last_location_accuracy_m: Optional[int] = Field(default=None, ge=0, description="Accuracy of the last location in meters")
+    last_location_source: Optional[str] = Field(default=None, max_length=20, description="Source of the location data (gps, network, etc)")
+    default_location_point: Optional[LocationPoint] = Field(default=None, description="User's primary/default service location")
+    location_tracking_enabled: bool = Field(default=False, description="Whether location tracking is active for this user")
 
-    isBanned: bool = False
+    is_banned: bool = Field(default=False, description="Administrative ban status")
 
 
 class ProfileCreate(ProfileBase):
-    """Fields required to create a profile."""
+    """
+    Schema for creating a new Profile.
+    """
+    user_id: Optional[UUID] = Field(default=None, description="ID of the user this profile belongs to")
+    seller_rating_avg: Decimal = Field(default=Decimal("0.00"), ge=0, le=5.0, description="Average rating of the seller (0-5)")
+    seller_rating_count: int = Field(default=0, ge=0, description="Total number of ratings received")
 
-    userId: Optional[UUID] = None
-    sellerRatingAvg: Decimal = Field(default=Decimal("0.00"), ge=0, le=9.99)
-    sellerRatingCount: int = Field(default=0, ge=0)
 
-
-class ProfileUpdate(BaseModel):
-    """Fields that can be updated for a profile (all optional)."""
-
+class ProfileUpdate(BaseSchema):
+    """
+    Schema for updating an existing Profile. All fields are optional.
+    """
     name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     bio: Optional[str] = None
-    photoUrl: Optional[str] = Field(default=None, max_length=500)
+    photo_url: Optional[str] = Field(default=None, max_length=500)
     cloudinary_public_id: Optional[str] = Field(default=None, max_length=500)
-    sellerStatus: Optional[Literal["none", "active", "suspended"]] = None
-    sellerCompletedOrdersCount: Optional[int] = Field(default=None, ge=0)
+    seller_status: Optional[Literal["none", "active", "suspended"]] = None
+    seller_completed_orders_count: Optional[int] = Field(default=None, ge=0)
     
-    # New Location Fields
     last_location_point: Optional[LocationPoint] = None
     last_location_accuracy_m: Optional[int] = Field(default=None, ge=0)
+    last_location_at: Optional[datetime] = None
     last_location_source: Optional[str] = Field(default=None, max_length=20)
     default_location_point: Optional[LocationPoint] = None
     location_tracking_enabled: Optional[bool] = None
 
-    isBanned: Optional[bool] = None
-    sellerRatingAvg: Optional[Decimal] = Field(default=None, ge=0, le=9.99)
-    sellerRatingCount: Optional[int] = Field(default=None, ge=0)
-
-class ProfileIdMixin(BaseModel):
-    """Mixin to ensure userId is the first field in the schema."""
-    userId: UUID
+    is_banned: Optional[bool] = None
+    seller_rating_avg: Optional[Decimal] = Field(default=None, ge=0, le=5.0)
+    seller_rating_count: Optional[int] = Field(default=None, ge=0)
 
 
-class ProfileResponse(ProfileIdMixin, ProfileBase):
-    """Profile object returned by the API."""
-
-    sellerRatingAvg: Decimal
-    sellerRatingCount: int
-    sellerCompletedOrdersCount: int
-    createdAt: datetime
-    updatedAt: datetime
+class ProfileResponse(ProfileBase):
+    """
+    Full Profile object returned by the API.
+    """
+    user_id: UUID
+    seller_rating_avg: Decimal
+    seller_rating_count: int
+    created_at: datetime
+    updated_at: datetime
 
     @field_validator("last_location_point", "default_location_point", mode="before")
     @classmethod
     def validate_geo(cls, v):
-        """Convert GeoAlchemy2 WKBElement/WKTElement or plain WKT string to LocationPoint."""
+        """
+        Converts PostGIS geography (WKB) or WKT strings into a LocationPoint schema.
+        Handles both ORM objects and dictionaries.
+        """
         if v is None:
             return None
         
-        # Handle binary WKB (PostGIS)
+        # Handle PostGIS WKBElement
         if isinstance(v, WKBElement):
             try:
                 shape = to_shape(v)
@@ -96,10 +103,9 @@ class ProfileResponse(ProfileIdMixin, ProfileBase):
             except Exception:
                 return None
         
-        # Handle string WKT "POINT(lon lat)" (SQLite/Dev)
+        # Handle string WKT "POINT(lon lat)" (Dev/SQLite fallback)
         if isinstance(v, str) and v.startswith("POINT"):
             try:
-                # Simple extraction from "POINT(lon lat)"
                 parts = v.replace("POINT(", "").replace(")", "").split()
                 if len(parts) == 2:
                     return LocationPoint(latitude=float(parts[1]), longitude=float(parts[0]))
@@ -108,137 +114,130 @@ class ProfileResponse(ProfileIdMixin, ProfileBase):
 
         if isinstance(v, dict):
             return LocationPoint(**v)
+            
         return v
 
-    class Config:
-        from_attributes = True
 
-
-class PrivateProfileResponse(BaseModel):
+class PrivateProfileResponse(BaseSchema):
     """
-    Detailed profile response for the authenticated user's own dashboard.
-    Includes identity (email) and aggregate metrics (totalServices).
+    Detailed personal profile response for the authenticated user.
+    Aggregates data from both User and Profile models.
     """
-
-    id: UUID
+    user_id: UUID
     name: str
+    bio: Optional[str] = None
     email: str
-    photoUrl: Optional[str] = None
-    sellerStatus: str
-    sellerCompletedOrdersCount: int
-    sellerRatingCount: int
-    totalServices: int
+    photo_url: Optional[str] = None
+    seller_status: str
+    seller_completed_orders_count: int
+    seller_rating_count: int
+    total_services: int
 
     @model_validator(mode="before")
     @classmethod
     def map_user_data(cls, data: any) -> any:
         """
-        Map data from User model.
-        Expected input: User instance with 'profile' and 'service_listings' loaded.
+        Maps fields from a User model (and its joined relations) into the schema.
+        Input is expected to be a User instance or dictionary with 'profile' and 'service_listings'.
         """
-        # If we already have a dict (e.g. from a test or manual construction)
         if isinstance(data, dict):
             return data
 
-        # Check if we have a User object with a profile
+        # Extract nested profile
         profile = getattr(data, "profile", None)
         if not profile:
             return data
 
-        # Calculate total services
+        # Calculate metrics from relations
         service_listings = getattr(data, "service_listings", [])
         total_services = len(service_listings)
 
         return {
-            "id": profile.userId,
+            "user_id": profile.userId,
             "name": profile.name,
+            "bio": profile.bio,
             "email": getattr(data, "email", "Unknown"),
-            "photoUrl": profile.photoUrl,
-            "sellerStatus": profile.sellerStatus,
-            "sellerCompletedOrdersCount": profile.sellerCompletedOrdersCount,
-            "sellerRatingCount": profile.sellerRatingCount,
-            "totalServices": total_services,
+            "photo_url": profile.photoUrl,
+            "seller_status": profile.sellerStatus,
+            "seller_completed_orders_count": profile.sellerCompletedOrdersCount,
+            "seller_rating_count": profile.sellerRatingCount,
+            "total_services": total_services,
         }
 
-    class Config:
-        from_attributes = True
 
-
-class ProfilePublicResponse(BaseModel):
+class ProfilePublicResponse(BaseSchema):
     """
-    Publicly accessible profile summary, primarily for admin listing.
-    Includes identity and status.
+    Publicly visible profile summary, often used in administrative lists or seller searches.
     """
-
-    id: UUID
-    userName: str
-    image: Optional[str] = None
+    user_id: UUID
+    user_name: str
+    photo_url: Optional[str] = None
     email: str
     phone: Optional[str] = None
-    sellerRatingAvg: Decimal = Decimal("0.00")
-    isBanned: bool = False
-    sellerCompletedOrdersCount: int
+    seller_rating_avg: Decimal = Field(default=Decimal("0.00"))
+    is_banned: bool = False
+    seller_completed_orders_count: int
 
     @model_validator(mode="before")
     @classmethod
     def map_profile_data(cls, data: any) -> any:
-        """Map fields from Profile and User models."""
-        if isinstance(data, dict):
-            return data
-
-        # Mapping for the public list
-        return {
-            "id": data.userId,
-            "userName": data.name,
-            "image": data.photoUrl,
-            "email": data.user.email if (hasattr(data, "user") and data.user) else "Unknown",
-            "phone": data.user.phone if (hasattr(data, "user") and data.user) else None,
-            "sellerRatingAvg": data.sellerRatingAvg,
-            "isBanned": data.isBanned,
-            "sellerCompletedOrdersCount": data.sellerCompletedOrdersCount,
-        }
-
-    class Config:
-        from_attributes = True
-
-
-class PublicProfileDetailResponse(BaseModel):
-    """
-    Enhanced public profile detail response.
-    Includes contact info and service counts.
-    """
-
-    id: UUID
-    name: str
-    image: Optional[str] = None
-    completedordercount: int
-    avgRating: Decimal
-    createdat: datetime
-    phone: Optional[str] = None
-    email: str
-    totalService: int
-
-    @model_validator(mode="before")
-    @classmethod
-    def map_profile_detail(cls, data: any) -> any:
-        """Map fields from Profile and joined User/Services relations."""
+        """
+        Maps fields from Profile and its related User into the public schema.
+        """
         if isinstance(data, dict):
             return data
 
         user = getattr(data, "user", None)
+        return {
+            "user_id": data.userId,
+            "user_name": data.name,
+            "photo_url": data.photoUrl,
+            "email": user.email if user else "Unknown",
+            "phone": user.phone if user else None,
+            "seller_rating_avg": data.sellerRatingAvg,
+            "is_banned": data.isBanned,
+            "seller_completed_orders_count": data.sellerCompletedOrdersCount,
+        }
+
+
+class PublicProfileDetailResponse(BaseSchema):
+    """
+    Enhanced public detail view for a specific profile.
+    Includes comprehensive stats, reviews, and service counts.
+    """
+    user_id: UUID
+    name: str
+    bio: Optional[str] = None
+    photo_url: Optional[str] = None
+    completed_order_count: int
+    avg_rating: Decimal
+    reviews_count: int
+    created_at: datetime
+    phone: Optional[str] = None
+    total_services: int
+
+    @model_validator(mode="before")
+    @classmethod
+    def map_profile_detail(cls, data: any) -> any:
+        """
+        Consolidates profile data, user contact info, and relational counts.
+        """
+        if isinstance(data, dict):
+            return data
+
+        user = getattr(data, "user", None)
+        # Assuming services are available via the user relationship or pre-fetched
         service_listings = getattr(user, "service_listings", []) if user else []
 
         return {
-            "id": data.userId,
+            "user_id": data.userId,
             "name": data.name,
-            "image": data.photoUrl,
-            "completedordercount": data.sellerCompletedOrdersCount,
-            "avgRating": data.sellerRatingAvg,
-            "createdat": data.createdAt,
+            "bio": data.bio,
+            "photo_url": data.photoUrl,
+            "completed_order_count": data.sellerCompletedOrdersCount,
+            "avg_rating": data.sellerRatingAvg,
+            "reviews_count": data.sellerRatingCount,
+            "created_at": data.created_at,
             "phone": user.phone if user else None,
-            "email": user.email if user else "Unknown",
-            "totalService": len(service_listings),
+            "total_services": len(service_listings),
         }
-
-    class Config:
-        from_attributes = True
