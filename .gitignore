@@ -29,3 +29,6 @@ env/
 
 # Mypy cache
 .mypy_cache/
+
+# Antigravity
+.agents/
