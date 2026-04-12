@@ -10,6 +10,7 @@ Run with:  uvicorn app.main:app --reload
 """
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from app.db.init_db import init_db
 from app.routes import api_router
 from app.core.logging import logger
@@ -18,9 +19,19 @@ from app.core.redis import close_redis_connection, test_redis_connection
 
 # ---------- Create the app ----------
 app = FastAPI(
-    title="FastAPI Example",
-    description="A clean FastAPI boilerplate with a User CRUD API",
+    title="Local Marketplace API",
+    description="Backend API for the Local Marketplace application, supporting service listings, orders, and reviews.",
     version="1.0.0",
+)
+
+# ---------- CORS Configuration ----------
+# Professional Tip: For production, replace ["*"] with your actual frontend URL
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
