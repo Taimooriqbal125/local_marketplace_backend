@@ -28,6 +28,7 @@ ORDER_MODEL_MAP = {
     "accepted_at": "acceptedAt",
     "seller_completed_at": "sellerCompletedAt",
     "buyer_completed_at": "buyerCompletedAt",
+    "cancelled_at": "cancelledAt",
 }
 
 
@@ -51,7 +52,7 @@ class OrderRepository:
             )
             .where(Order.id == order_id)
         )
-        return self.db.execute(stmt).scalar_one_or_none()
+        return self.db.execute(stmt).unique().scalar_one_or_none()
 
     # ── Collection Queries ───────────────────────────────────────────────────
 
@@ -79,7 +80,7 @@ class OrderRepository:
             stmt = stmt.where(Order.status == status)
             
         stmt = stmt.order_by(Order.created_at.desc()).offset(skip).limit(limit)
-        return list(self.db.execute(stmt).scalars().all())
+        return list(self.db.execute(stmt).unique().scalars().all())
 
     def get_by_seller(self, seller_id: uuid.UUID, status: Optional[str] = None, skip: int = 0, limit: int = 20) -> List[Order]:
         """Return orders received by a specific seller, with buyer and listing context."""
@@ -95,7 +96,7 @@ class OrderRepository:
             stmt = stmt.where(Order.status == status)
             
         stmt = stmt.order_by(Order.created_at.desc()).offset(skip).limit(limit)
-        return list(self.db.execute(stmt).scalars().all())
+        return list(self.db.execute(stmt).unique().scalars().all())
 
     def get_by_user(self, user_id: uuid.UUID, status: Optional[str] = None, skip: int = 0, limit: int = 20) -> List[Order]:
         """Return orders where the user is either the buyer or the seller."""
@@ -112,7 +113,7 @@ class OrderRepository:
             stmt = stmt.where(Order.status == status)
             
         stmt = stmt.order_by(Order.created_at.desc()).offset(skip).limit(limit)
-        return list(self.db.execute(stmt).scalars().all())
+        return list(self.db.execute(stmt).unique().scalars().all())
 
     def get_by_listing(self, listing_id: uuid.UUID, skip: int = 0, limit: int = 20) -> List[Order]:
         """Return all orders associated with a specific listing."""
@@ -187,6 +188,30 @@ class OrderRepository:
         self.db.commit()
         self.db.refresh(order)
         return order
+
+    def mark_as_cancelled(self, order: Order, cancelled_at: Optional[datetime] = None) -> Order:
+        """Transition status to 'cancelled' and stamp the cancellation time."""
+        order.status = "cancelled"
+        if order.cancelledAt is None:
+            order.cancelledAt = cancelled_at or datetime.now(timezone.utc)
+
+        self.db.commit()
+        self.db.refresh(order)
+        return order
+
+    def delete_cancelled_orders(self, before: datetime) -> int:
+        """Permanently remove cancelled orders older than the retention cutoff."""
+        deleted_count = (
+            self.db.query(Order)
+            .filter(
+                Order.status == "cancelled",
+                Order.cancelledAt.is_not(None),
+                Order.cancelledAt < before,
+            )
+            .delete(synchronize_session=False)
+        )
+        self.db.commit()
+        return deleted_count
 
     def delete(self, db_obj: Order) -> None:
         """Remove an order record from the database."""

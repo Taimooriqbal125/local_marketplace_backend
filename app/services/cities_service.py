@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException, status
 
+from app.core.cache import delete_cache_pattern_sync, get_cache_sync, set_cache_sync
 from app.repositories.cities_repo import CityRepository
 from app.schemas.cities import CityCreate, CityUpdate, CityOut
 
@@ -21,8 +22,41 @@ class CityConflictError(HTTPException):
 class CityService:
     """Service layer for City operations, encapsulating business logic."""
 
+    CACHE_TTL_SECONDS = 3600
+    CACHE_NAMESPACE = "cities"
+
     def __init__(self, db: Session) -> None:
         self.repo = CityRepository(db)
+
+    def _cache_key(self, suffix: str) -> str:
+        return f"{self.CACHE_NAMESPACE}:{suffix}"
+
+    def _cache_list(self, suffix: str, data: Sequence[CityOut]) -> None:
+        try:
+            set_cache_sync(
+                self._cache_key(suffix),
+                [item.model_dump(mode="json") for item in data],
+                expire=self.CACHE_TTL_SECONDS,
+            )
+        except Exception:
+            return
+
+    def _read_cached_list(self, suffix: str) -> list[CityOut] | None:
+        try:
+            cached_items = get_cache_sync(self._cache_key(suffix))
+        except Exception:
+            return None
+
+        if cached_items is None:
+            return None
+
+        return [CityOut.model_validate(item) for item in cached_items]
+
+    def _invalidate_cache(self) -> None:
+        try:
+            delete_cache_pattern_sync(f"{self.CACHE_NAMESPACE}:*")
+        except Exception:
+            return
 
     def get_city(self, city_id: uuid.UUID) -> CityOut:
         city = self.repo.get(city_id)
@@ -37,8 +71,15 @@ class CityService:
         return CityOut.model_validate(city)
 
     def list_cities(self, skip: int = 0, limit: int = 100) -> Sequence[CityOut]:
+        cache_key = f"list:{skip}:{limit}"
+        cached_cities = self._read_cached_list(cache_key)
+        if cached_cities is not None:
+            return cached_cities
+
         cities = self.repo.get_all(skip=skip, limit=limit)
-        return [CityOut.model_validate(city) for city in cities]
+        result = [CityOut.model_validate(city) for city in cities]
+        self._cache_list(cache_key, result)
+        return result
 
     def create_city(self, obj_in: CityCreate) -> CityOut:
         # Pre-check: slug must be unique
@@ -51,6 +92,7 @@ class CityService:
 
         try:
             city = self.repo.create(obj_in)
+            self._invalidate_cache()
             return CityOut.model_validate(city)
         except IntegrityError:
             raise CityConflictError()
@@ -62,6 +104,7 @@ class CityService:
             
         try:
             updated = self.repo.update(city, obj_in)
+            self._invalidate_cache()
             return CityOut.model_validate(updated)
         except IntegrityError:
             raise CityConflictError("Update failed: A city with this slug already exists.")
@@ -72,3 +115,4 @@ class CityService:
             raise CityNotFoundError()
             
         self.repo.delete(city)
+        self._invalidate_cache()

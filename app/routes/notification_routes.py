@@ -3,7 +3,7 @@ Notification Routes — API endpoints for user notifications.
 """
 
 import uuid
-from typing import List
+from typing import List, Dict
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
@@ -37,13 +37,14 @@ def list_notifications(
         limit=limit
     )
 
-@router.patch("/mark-all-as-read", response_model=List[NotificationMarkReadResponse])
+@router.patch("/mark-all-as-read", response_model=Dict[str, int])
 def mark_all_as_read(
     db: Session = Depends(get_db),
     current_user: User = Depends(security.get_current_user),
 ):
     """
     Mark all unread notifications for the current user as read.
+    Returns the count of notifications updated.
     """
     return NotificationService(db).mark_all_as_read(current_user_id=current_user.id)
 

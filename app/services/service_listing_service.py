@@ -72,7 +72,7 @@ class InvalidPricingRuleError(HTTPException):
     """Raised when pricing fields violate business rules."""
     def __init__(self, detail: str) -> None:
         super().__init__(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=detail,
         )
 
@@ -453,17 +453,11 @@ class ServiceListingService:
             skip=skip,
             limit=page_size,
         )
-        items = [
-            ServiceListingNearbyResponse.model_validate({
-                **listing.__dict__,
-                "distance_km": float(distance_km),
-                "city": listing.city,
-                "category": listing.category,
-                "seller": listing.seller,
-                "media": listing.media
-            })
-            for listing, distance_km in results
-        ]
+        items = []
+        for listing, distance_km in results:
+            payload = ServiceListingResponse.map_relationships(listing)
+            payload["distance_km"] = float(distance_km)
+            items.append(ServiceListingNearbyResponse.model_validate(payload))
         return ServiceListingNearbyListResponse(
             total=total,
             page=page,

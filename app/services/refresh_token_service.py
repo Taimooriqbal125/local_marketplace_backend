@@ -132,3 +132,24 @@ class RefreshTokenService:
             skip=skip,
             limit=limit,
         )
+
+    def cleanup_stale_tokens(
+        self,
+        revoked_days: Optional[int] = None,
+        expired_days: Optional[int] = None,
+    ) -> dict[str, int]:
+        """Delete old revoked/expired refresh tokens based on retention settings."""
+        if revoked_days is None:
+            revoked_days = settings.DELETE_REVOKED_REFRESH_TOKENS_IN_DAYS
+        if expired_days is None:
+            expired_days = settings.DELETE_EXPIRED_REFRESH_TOKENS_IN_DAYS
+
+        now = datetime.now(timezone.utc)
+        revoked_before = now - timedelta(days=revoked_days)
+        expired_before = now - timedelta(days=expired_days)
+
+        deleted_count = self.repo.delete_stale_tokens(
+            revoked_before=revoked_before,
+            expired_before=expired_before,
+        )
+        return {"deleted_count": deleted_count}

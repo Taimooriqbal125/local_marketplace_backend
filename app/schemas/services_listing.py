@@ -207,6 +207,7 @@ class ServiceListingResponse(ServiceListingCore):
             "category_name": category_name,
             "city_name": city_name,
             "image_url": image_url,
+            "service_location_point": getattr(data, "service_location", None),
             "seller": seller_summary
         })
         return result
@@ -218,6 +219,13 @@ class ServiceListingResponse(ServiceListingCore):
         if isinstance(v, WKBElement):
             shape = to_shape(v)
             return ServiceLocationPoint(latitude=shape.y, longitude=shape.x)
+        if isinstance(v, str) and v.startswith("POINT"):
+            try:
+                parts = v.replace("POINT(", "").replace(")", "").split()
+                if len(parts) == 2:
+                    return ServiceLocationPoint(latitude=float(parts[1]), longitude=float(parts[0]))
+            except Exception:
+                return None
         if isinstance(v, dict): return ServiceLocationPoint(**v)
         return v
 

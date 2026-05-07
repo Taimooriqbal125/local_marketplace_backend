@@ -17,4 +17,5 @@ from .review import Review
 from .notification import Notification
 from .refresh_token import RefreshToken
 from .otp_token import OTPToken
+from .user_device_tokens import UserDeviceToken
 

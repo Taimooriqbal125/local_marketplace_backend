@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 from sqlalchemy.sql import func
 
@@ -124,3 +125,22 @@ class RefreshTokenRepository:
 		"""Delete a refresh token record."""
 		self.db.delete(db_token)
 		self.db.commit()
+
+	def delete_stale_tokens(self, revoked_before: datetime, expired_before: datetime) -> int:
+		"""Delete refresh tokens that are no longer useful for rotation or auditing."""
+		deleted_count = (
+			self.db.query(RefreshToken)
+			.filter(
+				or_(
+					RefreshToken.expires_at < expired_before,
+					and_(
+						RefreshToken.revoked.is_(True),
+						RefreshToken.revoked_at.is_not(None),
+						RefreshToken.revoked_at < revoked_before,
+					),
+				)
+			)
+			.delete(synchronize_session=False)
+		)
+		self.db.commit()
+		return deleted_count

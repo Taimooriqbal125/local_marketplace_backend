@@ -64,7 +64,7 @@ class ReviewReceivedResponse(BaseSchema):
         reviewer_photo = None
         if data.reviewer and data.reviewer.profile:
             reviewer_name = data.reviewer.profile.name
-            reviewer_photo = data.reviewer.profile.photo_url
+            reviewer_photo = data.reviewer.profile.photoUrl
 
         # Service context
         service_title = "Unknown Service"
@@ -76,7 +76,7 @@ class ReviewReceivedResponse(BaseSchema):
             if listing.category:
                 category_name = listing.category.name
             if listing.media:
-                service_image = listing.media[0].image_url
+                service_image = listing.media[0].imageUrl
 
         # Convert ORM to dict and update with flattened fields
         result = {k: v for k, v in data.__dict__.items() if not k.startswith('_')}
@@ -113,7 +113,7 @@ class ReviewForServiceResponse(BaseSchema):
         reviewer_photo = None
         if data.reviewer and data.reviewer.profile:
             reviewer_name = data.reviewer.profile.name
-            reviewer_photo = data.reviewer.profile.photo_url
+            reviewer_photo = data.reviewer.profile.photoUrl
 
         result = {k: v for k, v in data.__dict__.items() if not k.startswith('_')}
         result.update({
@@ -149,7 +149,7 @@ class ReviewByUserResponse(BaseSchema):
         reviewer_photo = None
         if data.reviewer and data.reviewer.profile:
             reviewer_name = data.reviewer.profile.name or "Anonymous"
-            reviewer_photo = data.reviewer.profile.photo_url
+            reviewer_photo = data.reviewer.profile.photoUrl
 
         return {
             "id": data.id,
@@ -157,7 +157,7 @@ class ReviewByUserResponse(BaseSchema):
             "note": data.comment,
             "created_at": data.created_at,
             "reviewer": {
-                "id": data.reviewer_id,
+                "id": data.reviewerId,
                 "name": reviewer_name,
                 "photo_url": reviewer_photo,
             },
@@ -212,7 +212,7 @@ class ReviewGivenResponse(BaseSchema):
             service_name = listing.title
             category_name = listing.category.name if listing.category else "Other"
             if listing.media:
-                image_url = listing.media[0].image_url
+                image_url = listing.media[0].imageUrl
 
         result = {k: v for k, v in data.__dict__.items() if not k.startswith('_')}
         result.update({
@@ -248,7 +248,7 @@ class AdminReviewResponse(BaseSchema):
         service_images = []
         if data.order and data.order.listing:
             service_name = data.order.listing.title
-            service_images = [m.image_url for m in data.order.listing.media] if data.order.listing.media else []
+            service_images = [m.imageUrl for m in data.order.listing.media] if data.order.listing.media else []
 
         result = {k: v for k, v in data.__dict__.items() if not k.startswith('_')}
         result.update({

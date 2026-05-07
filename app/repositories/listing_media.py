@@ -36,7 +36,7 @@ class ListingMediaRepository:
         return (
             self.db.query(ListingMedia)
             .filter(ListingMedia.listingId == listing_id)
-            .order_by(ListingMedia.sortOrder.asc(), ListingMedia.createdAt.asc())
+            .order_by(ListingMedia.sortOrder.asc(), ListingMedia.created_at.asc())
             .all()
         )
 
@@ -45,10 +45,10 @@ class ListingMediaRepository:
     def create(self, obj_in: ListingMediaCreate) -> ListingMedia:
         """Insert a new media record for a listing."""
         db_obj = ListingMedia(
-            listingId=obj_in.listingId,
-            imageUrl=obj_in.imageUrl,
-            sortOrder=obj_in.sortOrder,
-            cloudinaryPublicId=obj_in.cloudinaryPublicId,
+            listingId=obj_in.listing_id,
+            imageUrl=obj_in.image_url,
+            sortOrder=obj_in.sort_order,
+            cloudinaryPublicId=obj_in.cloudinary_public_id,
         )
         self.db.add(db_obj)
         self.db.commit()
@@ -60,8 +60,13 @@ class ListingMediaRepository:
     ) -> ListingMedia:
         """Update an existing media record (e.g., change sortOrder or URL)."""
         update_data = obj_in.model_dump(exclude_unset=True)
+        field_map = {
+            "image_url": "imageUrl",
+            "sort_order": "sortOrder",
+        }
         for field, value in update_data.items():
-            setattr(db_obj, field, value)
+            orm_field = field_map.get(field, field)
+            setattr(db_obj, orm_field, value)
         
         self.db.commit()
         self.db.refresh(db_obj)

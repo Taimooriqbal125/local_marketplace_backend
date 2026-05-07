@@ -30,5 +30,34 @@ env/
 # Mypy cache
 .mypy_cache/
 
+# Ruff cache
+.ruff_cache/
+
+# Coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
+
+# Type checker cache
+.pyright/
+
+# Local test and scratch files (not for production push)
+tmp/
+
 # Antigravity
 .agents/
+
+# Recommended additions
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+*.egg
+*.whl
+.idea/
+.python-version
+.env.local
+.env.*
+.ipynb_checkpoints/
+.cache/

@@ -14,6 +14,16 @@ from app.models.notification import Notification
 from app.schemas.notification import NotificationCreate, NotificationUpdate
 from app.core.config import settings
 
+
+NOTIFICATION_MODEL_MAP = {
+    "user_id": "userId",
+    "sender_id": "senderId",
+    "order_id": "orderId",
+    "listing_id": "listingId",
+    "is_read": "isRead",
+    "read_at": "readAt",
+}
+
 class NotificationRepository:
     """Class-based repository for Notification."""
 
@@ -62,15 +72,14 @@ class NotificationRepository:
 
     def create(self, obj_in: NotificationCreate) -> Notification:
         """Insert a new notification."""
+        data = obj_in.model_dump()
+        db_data = {"isRead": False}
+        for key, value in data.items():
+            model_key = NOTIFICATION_MODEL_MAP.get(key, key)
+            db_data[model_key] = value
+
         db_obj = Notification(
-            userId=obj_in.userId,
-            senderId=obj_in.senderId,
-            orderId=obj_in.orderId,
-            listingId=obj_in.listingId,
-            type=obj_in.type,
-            title=obj_in.title,
-            body=obj_in.body,
-            isRead=False
+            **db_data
         )
         self.db.add(db_obj)
         self.db.commit()
@@ -81,10 +90,11 @@ class NotificationRepository:
         """Apply updates to an existing notification (e.g., mark as read)."""
         update_data = obj_in.model_dump(exclude_unset=True)
         for field, value in update_data.items():
-            setattr(db_obj, field, value)
-            if field == "isRead" and value is True:
+            model_field = NOTIFICATION_MODEL_MAP.get(field, field)
+            setattr(db_obj, model_field, value)
+            if model_field == "isRead" and value is True:
                 db_obj.readAt = datetime.now(timezone.utc)
-            elif field == "isRead" and value is False:
+            elif model_field == "isRead" and value is False:
                 db_obj.readAt = None
         
         self.db.commit()
@@ -99,29 +109,18 @@ class NotificationRepository:
         self.db.refresh(notification)
         return notification
 
-    def mark_all_as_read(self, user_id: uuid.UUID) -> list[Notification]:
-        """Mark all unread notifications for a user as read. Returns updated records."""
+    def mark_all_as_read(self, user_id: uuid.UUID) -> int:
+        """Mark all unread notifications for a user as read. Returns count of updated records."""
         now = datetime.now(timezone.utc)
-        
-        # 1. Fetch unread notifications
-        unread = self.db.query(Notification).filter(
-            Notification.userId == user_id, 
-            Notification.isRead == False
-        ).all()
-        
-        if not unread:
-            return []
-            
-        # 2. Update them
-        for n in unread:
-            n.isRead = True
-            n.readAt = now
-            
+
+        # Perform bulk UPDATE to avoid loading rows into Python and looping
+        result = (
+            self.db.query(Notification)
+            .filter(Notification.userId == user_id, Notification.isRead == False)
+            .update({Notification.isRead: True, Notification.readAt: now}, synchronize_session=False)
+        )
         self.db.commit()
-        # 3. Refresh and return
-        for n in unread:
-            self.db.refresh(n)
-        return unread
+        return result
 
     def delete(self, db_obj: Notification) -> None:
         """Remove a notification record."""

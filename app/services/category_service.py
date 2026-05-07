@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from fastapi import HTTPException, status
 
+from app.core.cache import delete_cache_pattern_sync, get_cache_sync, set_cache_sync
 from app.repositories.category_repo import CategoryRepository
 from app.schemas.category import (
     CategoryCreate,
@@ -28,8 +29,41 @@ class CategoryConflictError(HTTPException):
 class CategoryService:
     """Service layer for Category operations, encapsulating business logic."""
 
+    CACHE_TTL_SECONDS = 3600
+    CACHE_NAMESPACE = "categories"
+
     def __init__(self, db: Session) -> None:
         self.repo = CategoryRepository(db)
+
+    def _cache_key(self, suffix: str) -> str:
+        return f"{self.CACHE_NAMESPACE}:{suffix}"
+
+    def _cache_list(self, suffix: str, data: Sequence[CategoryOut]) -> None:
+        try:
+            set_cache_sync(
+                self._cache_key(suffix),
+                [item.model_dump(mode="json") for item in data],
+                expire=self.CACHE_TTL_SECONDS,
+            )
+        except Exception:
+            return
+
+    def _read_cached_list(self, suffix: str, model: type[CategoryOut]) -> List[CategoryOut] | None:
+        try:
+            cached_items = get_cache_sync(self._cache_key(suffix))
+        except Exception:
+            return None
+
+        if cached_items is None:
+            return None
+
+        return [model.model_validate(item) for item in cached_items]
+
+    def _invalidate_cache(self) -> None:
+        try:
+            delete_cache_pattern_sync(f"{self.CACHE_NAMESPACE}:*")
+        except Exception:
+            return
 
     def get_category(self, category_id: uuid.UUID) -> CategoryOut:
         """Fetch a single category or raise 404."""
@@ -46,12 +80,26 @@ class CategoryService:
         return CategoryOut.model_validate(category)
 
     def list_categories(self, skip: int = 0, limit: int = 100) -> Sequence[CategoryOut]:
+        cache_key = f"list:{skip}:{limit}"
+        cached_categories = self._read_cached_list(cache_key, CategoryOut)
+        if cached_categories is not None:
+            return cached_categories
+
         categories = self.repo.get_all(skip=skip, limit=limit)
-        return [CategoryOut.model_validate(cat) for cat in categories]
+        result = [CategoryOut.model_validate(cat) for cat in categories]
+        self._cache_list(cache_key, result)
+        return result
 
     def list_parent_categories(self, skip: int = 0, limit: int = 100) -> Sequence[CategoryParentOut]:
+        cache_key = f"parents:{skip}:{limit}"
+        cached_categories = self._read_cached_list(cache_key, CategoryParentOut)
+        if cached_categories is not None:
+            return cached_categories
+
         categories = self.repo.get_parent_categories(skip=skip, limit=limit)
-        return [CategoryParentOut.model_validate(cat) for cat in categories]
+        result = [CategoryParentOut.model_validate(cat) for cat in categories]
+        self._cache_list(cache_key, result)
+        return result
 
     def list_categories_by_parent(
         self, parent_id: uuid.UUID, skip: int = 0, limit: int = 100
@@ -60,8 +108,15 @@ class CategoryService:
         if not parent:
             raise CategoryNotFoundError("Parent category not found")
 
+        cache_key = f"children:{parent_id}:{skip}:{limit}"
+        cached_categories = self._read_cached_list(cache_key, CategoryOut)
+        if cached_categories is not None:
+            return cached_categories
+
         categories = self.repo.get_children(parent_id=parent_id, skip=skip, limit=limit)
-        return [CategoryOut.model_validate(cat) for cat in categories]
+        result = [CategoryOut.model_validate(cat) for cat in categories]
+        self._cache_list(cache_key, result)
+        return result
 
     def create_category(self, obj_in: CategoryCreate) -> CategoryOut:
         # Pre-check: slug must be unique
@@ -70,6 +125,7 @@ class CategoryService:
             
         try:
             category = self.repo.create(obj_in)
+            self._invalidate_cache()
             return CategoryOut.model_validate(category)
         except IntegrityError:
             raise CategoryConflictError()
@@ -81,6 +137,7 @@ class CategoryService:
             
         try:
             updated = self.repo.update(category, obj_in)
+            self._invalidate_cache()
             return CategoryOut.model_validate(updated)
         except IntegrityError:
             raise CategoryConflictError("Update failed: A category with this slug or name already exists.")
@@ -91,6 +148,7 @@ class CategoryService:
             raise CategoryNotFoundError()
             
         self.repo.delete(category)
+        self._invalidate_cache()
 
     def get_category_admin(self, category_id: uuid.UUID) -> CategoryTreeOut:
         """Admin-only: Fetch category details with immediate children."""

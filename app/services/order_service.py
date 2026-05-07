@@ -3,11 +3,13 @@ Order Service — encapsulates business logic for managing orders.
 """
 
 import uuid
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Tuple
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.repositories.order_repo import OrderRepository
 from app.repositories.service_listing_repo import ServiceListingRepository
 from app.repositories.profile_repo import ProfileRepository
@@ -119,7 +121,7 @@ class OrderService:
         if order.status != "requested":
             raise OrderStateError("Only orders in 'requested' status can be cancelled")
 
-        self.repo.delete(order)
+        self.repo.mark_as_cancelled(order)
         return {
             "message": "Order request cancelled successfully",
             "orderId": order_id,
@@ -214,7 +216,7 @@ class OrderService:
         if is_buyer and order.status != "requested":
             raise OrderStateError("Buyers can only cancel an order before it is accepted")
             
-        updated_order = self.repo.update(order, obj_in)
+        updated_order = self.repo.mark_as_cancelled(order)
         
         target_user_id = order.sellerId if is_buyer else order.buyerId
         canceller_name, _, _ = self._get_user_details(current_user_id)
@@ -228,3 +230,12 @@ class OrderService:
             body=f"{canceller_name} has cancelled the order. You may try placing another request later."
         )
         return updated_order
+
+    def cleanup_cancelled_orders(self, retention_days: Optional[int] = None) -> dict[str, int]:
+        """Delete cancelled orders that have aged past the configured retention window."""
+        if retention_days is None:
+            retention_days = settings.DELETE_CANCELLED_ORDERS_IN_DAYS
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        deleted_count = self.repo.delete_cancelled_orders(before=cutoff)
+        return {"deleted_count": deleted_count}

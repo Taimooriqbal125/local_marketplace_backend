@@ -93,7 +93,7 @@ class OrderResponse(BaseSchema):
         if hasattr(data, "listing") and data.listing:
             service_name = data.listing.title or "Unknown Service"
             if data.listing.media:
-                service_image = data.listing.media[0].image_url
+                service_image = getattr(data.listing.media[0], "imageUrl", None)
 
         if hasattr(data, "seller") and data.seller and data.seller.profile:
             seller_name = data.seller.profile.name or "Unknown"
@@ -146,9 +146,9 @@ class OrderAsSellerResponse(BaseSchema):
         service_price = 0.0
         if data.listing:
             service_name = data.listing.title
-            service_price = float(data.listing.price_amount or 0)
+            service_price = float(getattr(data.listing, "priceAmount", 0) or 0)
             if data.listing.media:
-                service_image = data.listing.media[0].image_url
+                service_image = getattr(data.listing.media[0], "imageUrl", None)
 
         result = {k: v for k, v in data.__dict__.items() if not k.startswith('_')}
         result.update({
@@ -197,9 +197,9 @@ class OrderAsBuyerResponse(BaseSchema):
         service_price = 0.0
         if data.listing:
             service_name = data.listing.title
-            service_price = float(data.listing.price_amount or 0)
+            service_price = float(getattr(data.listing, "priceAmount", 0) or 0)
             if data.listing.media:
-                service_image = data.listing.media[0].image_url
+                service_image = getattr(data.listing.media[0], "imageUrl", None)
 
         seller_name = "Unknown"
         seller_phone = data.seller.phone if data.seller else None
@@ -261,12 +261,12 @@ class OrderDetailResponse(BaseSchema):
 
         # Seller
         seller_name = data.seller.profile.name if data.seller and data.seller.profile else "Unknown"
-        seller_photo = data.seller.profile.photo_url if data.seller and data.seller.profile else None
+        seller_photo = data.seller.profile.photoUrl if data.seller and data.seller.profile else None
         seller_phone = data.seller.phone if data.seller else None
 
         # Buyer
         buyer_name = data.buyer.profile.name if data.buyer and data.buyer.profile else "Unknown"
-        buyer_photo = data.buyer.profile.photo_url if data.buyer and data.buyer.profile else None
+        buyer_photo = data.buyer.profile.photoUrl if data.buyer and data.buyer.profile else None
         buyer_phone = data.buyer.phone if data.buyer else None
 
         # Listing
@@ -278,12 +278,12 @@ class OrderDetailResponse(BaseSchema):
 
         if data.listing:
             service_name = data.listing.title
-            price_type = data.listing.price_type
-            listing_price = float(data.listing.price_amount or 0)
+            price_type = getattr(data.listing, "priceType", "fixed")
+            listing_price = float(getattr(data.listing, "priceAmount", 0) or 0)
             if data.listing.category:
                 category_name = data.listing.category.name
             if data.listing.media:
-                service_image = data.listing.media[0].image_url
+                service_image = getattr(data.listing.media[0], "imageUrl", None)
 
         result = {k: v for k, v in data.__dict__.items() if not k.startswith('_')}
         result.update({

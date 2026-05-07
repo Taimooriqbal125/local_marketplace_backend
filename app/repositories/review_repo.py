@@ -58,7 +58,7 @@ class ReviewRepository:
             stmt = stmt.where(Review.rating == rating)
 
         stmt = stmt.order_by(Review.created_at.desc()).offset(skip).limit(limit)
-        return list(self.db.execute(stmt).scalars().all())
+        return list(self.db.execute(stmt).unique().scalars().all())
 
     def get_given_by_user(
         self, user_id: uuid.UUID, skip: int = 0, limit: int = 20
@@ -75,7 +75,7 @@ class ReviewRepository:
             .offset(skip)
             .limit(limit)
         )
-        return list(self.db.execute(stmt).scalars().all())
+        return list(self.db.execute(stmt).unique().scalars().all())
 
     def get_by_listing(
         self, listing_id: uuid.UUID, skip: int = 0, limit: int = 20
@@ -94,7 +94,7 @@ class ReviewRepository:
             .offset(skip)
             .limit(limit)
         )
-        return list(self.db.execute(stmt).scalars().all())
+        return list(self.db.execute(stmt).unique().scalars().all())
 
     def get_all_filtered(
         self,
@@ -116,7 +116,7 @@ class ReviewRepository:
             stmt = stmt.where(Review.created_at >= start_date)
 
         stmt = stmt.order_by(Review.created_at.desc()).offset(skip).limit(limit)
-        return list(self.db.execute(stmt).scalars().all())
+        return list(self.db.execute(stmt).unique().scalars().all())
 
     def create(
         self, obj_in: ReviewCreate, reviewer_id: uuid.UUID, reviewed_user_id: uuid.UUID

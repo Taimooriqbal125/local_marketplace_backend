@@ -44,41 +44,64 @@ async def _http_rate_limit_callback(request: Request, response: Response, pexpir
 # Adaptive Syntax Detector (Supports 0.1.x AND 0.2.x simultaneously)
 # ---------------------------------------------------------------------
 _IS_V2 = "limiter" in inspect.signature(RateLimiter.__init__).parameters
+_RATE_LIMITING_ENABLED = _IS_V2
 
 # ---------------------------------------------------------------------
 # Step 2: Initialize rate limiter
 # ---------------------------------------------------------------------
 async def init_rate_limiter():
+    global _RATE_LIMITING_ENABLED
+
     if _IS_V2:
+        _RATE_LIMITING_ENABLED = True
         logger.info("Rate limiter running in v0.2.0 (pyrate-limiter) syntax mode.")
     else:
         from fastapi_limiter import FastAPILimiter
-        await FastAPILimiter.init(
-            redis,
-            prefix="local-marketplace",
-            http_callback=_http_rate_limit_callback,
-        )
-        logger.info("Rate limiter initialized in v0.1.x (Redis) syntax mode.")
+        try:
+            await FastAPILimiter.init(
+                redis,
+                prefix="local-marketplace",
+                http_callback=_http_rate_limit_callback,
+            )
+            _RATE_LIMITING_ENABLED = True
+            logger.info("Rate limiter initialized in v0.1.x (Redis) syntax mode.")
+        except Exception as exc:
+            _RATE_LIMITING_ENABLED = False
+            logger.error(
+                "Rate limiter disabled because Redis initialization failed",
+                error=str(exc),
+            )
 
 # ---------------------------------------------------------------------
 # Step 3: RateLimiter dependencies
 # ---------------------------------------------------------------------
 def create_limiter(times: int, seconds: int):
-    """Dynamically initializes the rate limiter matching your package version."""
+    """Create a dependency that no-ops when limiter backend is unavailable."""
     if _IS_V2:
         from pyrate_limiter import Duration, Limiter, Rate
-        return RateLimiter(limiter=Limiter(Rate(times, Duration.SECOND * seconds)))
+        limiter = RateLimiter(limiter=Limiter(Rate(times, Duration.SECOND * seconds)))
     else:
-        return RateLimiter(times=times, seconds=seconds)
+        limiter = RateLimiter(times=times, seconds=seconds)
+
+    async def dependency(request: Request, response: Response):
+        if not _RATE_LIMITING_ENABLED:
+            return None
+
+        result = limiter(request=request, response=response)
+        if inspect.isawaitable(result):
+            await result
+        return None
+
+    return dependency
 
 example_rate_limit = create_limiter(10, 60)
-services_list_rate_limit = create_limiter(4, 60)
-login_rate_limit = create_limiter(2, 60)
-signup_rate_limit = create_limiter(2, 60)
-refresh_issue_rate_limit = create_limiter(2, 60)
-services_create_rate_limit = create_limiter(3, 60)
-services_nearby_me_rate_limit = create_limiter(3, 60)
-forgot_password_rate_limit = create_limiter(3, 60)
+services_list_rate_limit = create_limiter(60, 60)
+login_rate_limit = create_limiter(5, 60)
+signup_rate_limit = create_limiter(4, 60)
+refresh_issue_rate_limit = create_limiter(30, 60)
+services_create_rate_limit = create_limiter(10, 60)
+services_nearby_me_rate_limit = create_limiter(30, 60)
+forgot_password_rate_limit = create_limiter(5, 60)
 
 # ---------------------------------------------------------------------
 # Step 4: Usage in FastAPI routes

@@ -27,6 +27,27 @@ class Settings(BaseSettings):
     DELETE_READ_NOTIFICATIONS_IN_DAYS: int = Field(..., description="Days to keep read notifications")
     DELETE_UNREAD_NOTIFICATIONS_IN_DAYS: int = Field(..., description="Days to keep unread notifications")
 
+    # Refresh token retention
+    DELETE_REVOKED_REFRESH_TOKENS_IN_DAYS: int = Field(
+        default=30,
+        description="Days to keep revoked refresh tokens before deleting",
+    )
+    DELETE_EXPIRED_REFRESH_TOKENS_IN_DAYS: int = Field(
+        default=7,
+        description="Days to keep expired refresh tokens before deleting",
+    )
+
+    # Order retention
+    DELETE_CANCELLED_ORDERS_IN_DAYS: int = Field(
+        default=30,
+        description="Days to keep cancelled orders before deleting",
+    )
+
+    # Device token retention
+    DELETE_INACTIVE_DEVICE_TOKENS_IN_DAYS: int = Field(
+        default=90,
+        description="Days to keep inactive device tokens before deleting",
+    )
     # SendGrid Email Settings
     SENDGRID_API_KEY: str = Field(..., description="Twilio SendGrid API Key")
     SENDGRID_FROM_EMAIL: str = Field(..., description="Verified sender email for SendGrid")

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 
-from sqlalchemy import String, Integer, ForeignKey, DateTime, text, CheckConstraint
+from sqlalchemy import String, Integer, ForeignKey, DateTime, text, CheckConstraint, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -49,6 +49,7 @@ class Order(Base, TimestampMixin):
         # Business rules validation at database level
         CheckConstraint('"proposedPrice" > 0', name="ck_orders_proposed_price_positive"),
         CheckConstraint('"agreedPrice" IS NULL OR "agreedPrice" > 0', name="ck_orders_agreed_price_positive"),
+        Index("ix_orders_status_cancelled_at", "status", "cancelledAt"),
     )
 
     # Primary Key
@@ -122,6 +123,11 @@ class Order(Base, TimestampMixin):
         DateTime(timezone=True),
         nullable=True,
         doc="Timestamp when buyer confirmed completion."
+    )
+    cancelledAt: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc="Timestamp when the order was cancelled."
     )
 
     # Relationships

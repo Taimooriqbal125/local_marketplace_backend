@@ -19,6 +19,7 @@ from app.core.rate_limiter import (
 )
 from app.db.session import get_db
 from app.models.user import User
+from app.schemas.listing_media import ListingMediaCreate
 from app.schemas.services_listing import (
     ServiceListingCreate,
     ServiceListingFilterParams,
@@ -54,12 +55,15 @@ def _parse_service_listing_form(
     service_point: Optional[str] = Form(default=None, alias="servicePoint"),
     service_point_latitude: Optional[float] = Form(default=None, alias="servicePoint.latitude"),
     service_point_longitude: Optional[float] = Form(default=None, alias="servicePoint.longitude"),
+    service_location_point: Optional[str] = Form(default=None, alias="serviceLocationPoint"),
+    service_location_point_latitude: Optional[float] = Form(default=None, alias="serviceLocationPoint.latitude"),
+    service_location_point_longitude: Optional[float] = Form(default=None, alias="serviceLocationPoint.longitude"),
     latitude: Optional[float] = Form(default=None, alias="latitude"),
     longitude: Optional[float] = Form(default=None, alias="longitude"),
 ) -> Optional[ServiceListingCreate]:
     """
     Parse multipart/form-data into ServiceListingCreate.
-    Accepts servicePoint as JSON string, e.g. {"latitude": 24.8, "longitude": 67.0}.
+    Accepts servicePoint/serviceLocationPoint as JSON string, e.g. {"latitude": 24.8, "longitude": 67.0}.
     Returns None when no form listing fields are provided.
     """
     has_form_payload = any(
@@ -78,6 +82,9 @@ def _parse_service_listing_form(
             service_point,
             service_point_latitude,
             service_point_longitude,
+            service_location_point,
+            service_location_point_latitude,
+            service_location_point_longitude,
             latitude,
             longitude,
         )
@@ -86,24 +93,42 @@ def _parse_service_listing_form(
         return None
 
     parsed_service_point = None
-    lat_value = service_point_latitude if service_point_latitude is not None else latitude
-    lon_value = service_point_longitude if service_point_longitude is not None else longitude
+    lat_value = (
+        service_location_point_latitude
+        if service_location_point_latitude is not None
+        else service_point_latitude
+        if service_point_latitude is not None
+        else latitude
+    )
+    lon_value = (
+        service_location_point_longitude
+        if service_location_point_longitude is not None
+        else service_point_longitude
+        if service_point_longitude is not None
+        else longitude
+    )
 
     if lat_value is not None or lon_value is not None:
         if lat_value is None or lon_value is None:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Both latitude and longitude are required when using form coordinate fields.",
             )
         parsed_service_point = {"latitude": lat_value, "longitude": lon_value}
-    elif service_point is not None and str(service_point).strip() != "":
-        try:
-            parsed_service_point = json.loads(service_point)
-        except json.JSONDecodeError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="servicePoint must be a valid JSON object string.",
-            ) from exc
+    else:
+        raw_point = (
+            service_location_point
+            if service_location_point is not None and str(service_location_point).strip() != ""
+            else service_point
+        )
+        if raw_point is not None and str(raw_point).strip() != "":
+            try:
+                parsed_service_point = json.loads(raw_point)
+            except json.JSONDecodeError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail="servicePoint/serviceLocationPoint must be a valid JSON object string.",
+                ) from exc
 
     try:
         return ServiceListingCreate.model_validate(
@@ -118,12 +143,104 @@ def _parse_service_listing_form(
                 "categoryId": category_id,
                 "cityId": city_id,
                 "status": status_value if status_value is not None else "draft",
-                "servicePoint": parsed_service_point,
+                "serviceLocationPoint": parsed_service_point,
             }
         )
     except ValidationError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=jsonable_encoder(exc.errors()),
+        ) from exc
+
+
+def _parse_service_listing_update_form(
+    title: Optional[str] = Form(default=None),
+    description: Optional[str] = Form(default=None),
+    price_type: Optional[str] = Form(default=None, alias="priceType"),
+    price_amount: Optional[float] = Form(default=None, alias="priceAmount"),
+    is_negotiable: Optional[bool] = Form(default=None, alias="isNegotiable"),
+    service_location: Optional[str] = Form(default=None, alias="serviceLocation"),
+    service_radius_km: Optional[float] = Form(default=None, alias="serviceRadiusKm"),
+    category_id: Optional[uuid.UUID] = Form(default=None, alias="categoryId"),
+    city_id: Optional[uuid.UUID] = Form(default=None, alias="cityId"),
+    status_value: Optional[str] = Form(default=None, alias="status"),
+    service_location_point: Optional[str] = Form(default=None, alias="serviceLocationPoint"),
+    service_location_point_latitude: Optional[float] = Form(default=None, alias="serviceLocationPoint.latitude"),
+    service_location_point_longitude: Optional[float] = Form(default=None, alias="serviceLocationPoint.longitude"),
+    latitude: Optional[float] = Form(default=None, alias="latitude"),
+    longitude: Optional[float] = Form(default=None, alias="longitude"),
+) -> Optional[ServiceListingUpdate]:
+    """Parse multipart/form-data into ServiceListingUpdate for PATCH operations."""
+    has_form_payload = any(
+        value is not None
+        for value in (
+            title,
+            description,
+            price_type,
+            price_amount,
+            is_negotiable,
+            service_location,
+            service_radius_km,
+            category_id,
+            city_id,
+            status_value,
+            service_location_point,
+            service_location_point_latitude,
+            service_location_point_longitude,
+            latitude,
+            longitude,
+        )
+    )
+    if not has_form_payload:
+        return None
+
+    parsed_service_location_point = None
+    lat_value = (
+        service_location_point_latitude
+        if service_location_point_latitude is not None
+        else latitude
+    )
+    lon_value = (
+        service_location_point_longitude
+        if service_location_point_longitude is not None
+        else longitude
+    )
+
+    if lat_value is not None or lon_value is not None:
+        if lat_value is None or lon_value is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Both latitude and longitude are required when using form coordinate fields.",
+            )
+        parsed_service_location_point = {"latitude": lat_value, "longitude": lon_value}
+    elif service_location_point is not None and str(service_location_point).strip() != "":
+        try:
+            parsed_service_location_point = json.loads(service_location_point)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="serviceLocationPoint must be a valid JSON object string.",
+            ) from exc
+
+    try:
+        return ServiceListingUpdate.model_validate(
+            {
+                "title": title,
+                "description": description,
+                "priceType": price_type,
+                "priceAmount": price_amount,
+                "isNegotiable": is_negotiable,
+                "serviceLocation": service_location,
+                "serviceRadiusKm": service_radius_km,
+                "categoryId": category_id,
+                "cityId": city_id,
+                "status": status_value,
+                "serviceLocationPoint": parsed_service_location_point,
+            }
+        )
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail=jsonable_encoder(exc.errors()),
         ) from exc
 
@@ -330,6 +447,13 @@ def get_listing(
 
 
 @router.post(
+    "",
+    include_in_schema=False,
+    response_model=ServiceListingResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(services_create_rate_limit)],
+)
+@router.post(
     "/",
     response_model=ServiceListingResponse,
     status_code=status.HTTP_201_CREATED,
@@ -358,7 +482,7 @@ async def create_listing(
     payload = listing_in if listing_in is not None else listing_form
     if payload is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="Provide listing data as JSON body or multipart/form-data fields.",
         )
 
@@ -366,23 +490,40 @@ async def create_listing(
 
     if images:
         media_service = ListingMediaService(db)
+        primary_image_url: Optional[str] = None
         for sort_order, image in enumerate(images):
             if image is None or not getattr(image, "filename", None):
                 continue
-            await media_service.upload_and_add_media(
+            media_record = await media_service.upload_and_add_media(
                 listing_id=created_listing.id,
                 file=image,
                 sort_order=sort_order,
                 current_seller_id=current_user.id,
             )
 
+            if primary_image_url is None and media_record.image_url:
+                primary_image_url = media_record.image_url
+
+        if primary_image_url is not None:
+            created_listing.image_url = primary_image_url
+
     return created_listing
 
 
 @router.patch("/{listing_id}", response_model=ServiceListingResponse)
-def update_listing(
+async def update_listing(
     listing_id: uuid.UUID,
-    listing_in: ServiceListingUpdate,
+    listing_in: Optional[ServiceListingUpdate] = Body(default=None),
+    listing_form: Optional[ServiceListingUpdate] = Depends(_parse_service_listing_update_form),
+    images: Optional[list[UploadFile]] = File(
+        default=None,
+        description="Optional replacement image files. If provided, existing media will be replaced.",
+    ),
+    image_url: Optional[str] = Form(
+        default=None,
+        alias="imageUrl",
+        description="Optional replacement image URL. If provided, existing media will be replaced.",
+    ),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -390,12 +531,66 @@ def update_listing(
     Update an existing listing.
     Only the owner of the listing can update it.
     """
-    return ServiceListingService(db).update_listing(
-        listing_id=listing_id,
-        obj_in=listing_in,
-        current_seller_id=current_user.id,
-        is_admin=current_user.is_admin,
-    )
+    if images and image_url is not None and image_url.strip() != "":
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Use either 'images' or 'imageUrl', not both in the same request.",
+        )
+
+    payload = listing_in if listing_in is not None else listing_form
+    has_image_url = image_url is not None and image_url.strip() != ""
+    has_images = bool(images)
+
+    if payload is None and not has_image_url and not has_images:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Provide at least one listing field, 'imageUrl', or 'images' for PATCH update.",
+        )
+
+    service = ServiceListingService(db)
+    if payload is not None:
+        service.update_listing(
+            listing_id=listing_id,
+            obj_in=payload,
+            current_seller_id=current_user.id,
+            is_admin=current_user.is_admin,
+        )
+
+    if has_image_url or has_images:
+        media_service = ListingMediaService(db)
+        existing_media = media_service.get_listing_media(listing_id)
+
+        for media in existing_media:
+            await media_service.delete_media(
+                media_id=media.id,
+                current_seller_id=current_user.id,
+                is_admin=current_user.is_admin,
+            )
+
+        if has_image_url:
+            media_service.add_media(
+                ListingMediaCreate(
+                    listing_id=listing_id,
+                    image_url=image_url.strip(),
+                    sort_order=0,
+                ),
+                current_seller_id=current_user.id,
+            )
+        elif images:
+            for sort_order, image in enumerate(images):
+                if image is None or not getattr(image, "filename", None):
+                    continue
+                await media_service.upload_and_add_media(
+                    listing_id=listing_id,
+                    file=image,
+                    sort_order=sort_order,
+                    current_seller_id=current_user.id,
+                )
+
+    listing = service.repo.get(listing_id)
+    if listing is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Listing not found")
+    return ServiceListingResponse.model_validate(listing)
 
 
 @router.delete("/{listing_id}", status_code=status.HTTP_200_OK)

@@ -1,11 +1,13 @@
 # app/core/cache.py
 
 """
-Async caching module for the project using Redis.
-This file provides utility functions to manage cache efficiently.
+Caching module for the project using Redis.
+This file provides sync helpers for service-layer use and async wrappers for
+decorator use.
 
 Key Features:
-- Async Redis client (latest redis library)
+- Sync Redis client for loop-safe cache access from sync services
+- Async wrappers for async decorator use
 - Cache get, set, delete operations
 - TTL (Time To Live) support
 - Manual invalidation
@@ -13,15 +15,69 @@ Key Features:
 - Fully commented for agent/teammate understanding
 """
 
+import asyncio
 import json
+import anyio
+from redis import Redis as SyncRedis
+
 from app.core.logging import logger
-from app.core.redis import get_redis
+from app.core.config import settings
 
 # ---------------------------------------------------------------------
 # Step 1: Initialize Redis connection
 # ---------------------------------------------------------------------
-# Use the centralized Redis connection from app.core.redis.
-redis = get_redis()
+# Use a dedicated sync Redis client here so sync service code never crosses
+# async event-loop boundaries.
+redis = SyncRedis.from_url(
+    settings.REDIS_URL,
+    encoding="utf-8",
+    decode_responses=True,
+    health_check_interval=30,
+    socket_connect_timeout=5,
+    socket_timeout=5,
+    retry_on_timeout=True,
+)
+
+
+def _serialize_value(value):
+    return json.dumps(value)
+
+
+def _deserialize_value(value):
+    return json.loads(value)
+
+
+def _get_cache_sync(key: str):
+    cached_value = redis.get(key)
+    if cached_value:
+        logger.info("Cache hit", key=key)
+        return _deserialize_value(cached_value)
+
+    logger.info("Cache miss", key=key)
+    return None
+
+
+def _set_cache_sync(key: str, value, expire: int = 60):
+    json_value = _serialize_value(value)
+    redis.set(key, json_value, ex=expire)
+    logger.info("Cache set", key=key, expire=expire)
+
+
+def _delete_cache_sync(key: str):
+    deleted_count = redis.delete(key)
+    if deleted_count:
+        logger.info("Cache invalidated", key=key)
+    else:
+        logger.info("Cache key not found for invalidation", key=key)
+
+
+def _delete_cache_pattern_sync(pattern: str):
+    keys = redis.keys(pattern)
+    if keys:
+        redis.delete(*keys)
+        logger.info("Cache pattern invalidated", pattern=pattern, deleted=len(keys))
+    else:
+        logger.info("No cache keys matched pattern", pattern=pattern)
 
 # ---------------------------------------------------------------------
 # Step 2: Helper function to set cache
@@ -38,14 +94,7 @@ async def set_cache(key: str, value, expire: int = 60):
     Usage:
         await set_cache("products:list", data, expire=120)
     """
-    # Convert value to JSON string for safe storage
-    json_value = json.dumps(value)
-    
-    # Store in Redis with TTL
-    await redis.set(key, json_value, ex=expire)
-    
-    # Log the cache set operation
-    logger.info("Cache set", key=key, expire=expire)
+    await anyio.to_thread.run_sync(_set_cache_sync, key, value, expire)
 
 # ---------------------------------------------------------------------
 # Step 3: Helper function to get cache
@@ -63,17 +112,7 @@ async def get_cache(key: str):
     Usage:
         data = await get_cache("products:list")
     """
-    # Get JSON string from Redis
-    cached_value = await redis.get(key)
-    
-    if cached_value:
-        # Log cache hit
-        logger.info("Cache hit", key=key)
-        return json.loads(cached_value)  # Convert back to Python object
-    
-    # Log cache miss
-    logger.info("Cache miss", key=key)
-    return None
+    return await anyio.to_thread.run_sync(_get_cache_sync, key)
 
 # ---------------------------------------------------------------------
 # Step 4: Helper function to delete cache (manual invalidation)
@@ -88,13 +127,7 @@ async def delete_cache(key: str):
     Usage:
         await delete_cache("products:list")
     """
-    deleted_count = await redis.delete(key)
-    
-    # Log the invalidation
-    if deleted_count:
-        logger.info("Cache invalidated", key=key)
-    else:
-        logger.info("Cache key not found for invalidation", key=key)
+    await anyio.to_thread.run_sync(_delete_cache_sync, key)
 
 # ---------------------------------------------------------------------
 # Step 5: Optional: Pattern-based invalidation
@@ -110,9 +143,34 @@ async def delete_cache_pattern(pattern: str):
     Usage:
         await delete_cache_pattern("products:*")
     """
-    keys = await redis.keys(pattern)
-    if keys:
-        await redis.delete(*keys)
-        logger.info("Cache pattern invalidated", pattern=pattern, deleted=len(keys))
-    else:
-        logger.info("No cache keys matched pattern", pattern=pattern)
+    await anyio.to_thread.run_sync(_delete_cache_pattern_sync, pattern)
+
+
+def _run_sync_cache_task(coro):
+    """Run an async cache helper from synchronous code."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    raise RuntimeError("Synchronous cache helpers cannot be used from an async context.")
+
+
+def get_cache_sync(key: str):
+    """Synchronous wrapper for get_cache()."""
+    return _get_cache_sync(key)
+
+
+def set_cache_sync(key: str, value, expire: int = 60):
+    """Synchronous wrapper for set_cache()."""
+    return _set_cache_sync(key, value, expire=expire)
+
+
+def delete_cache_sync(key: str):
+    """Synchronous wrapper for delete_cache()."""
+    return _delete_cache_sync(key)
+
+
+def delete_cache_pattern_sync(pattern: str):
+    """Synchronous wrapper for delete_cache_pattern()."""
+    return _delete_cache_pattern_sync(pattern)

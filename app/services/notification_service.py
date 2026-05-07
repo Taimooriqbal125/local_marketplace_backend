@@ -5,6 +5,8 @@ Notification Service — encapsulates business logic for notifications.
 from __future__ import annotations
 
 import uuid
+import asyncio
+import anyio
 from typing import List, Optional
 
 from fastapi import HTTPException, status
@@ -14,6 +16,7 @@ from app.repositories.notification_repo import NotificationRepository
 from app.schemas.notification import NotificationCreate
 from app.models.notification import Notification
 from app.websocket import manager
+from app.services.push_notification_service import PushNotificationService
 
 
 class NotificationNotFoundError(HTTPException):
@@ -66,8 +69,9 @@ class NotificationService:
         return self.repo.mark_as_read(notification)
 
     def mark_all_as_read(self, current_user_id: uuid.UUID):
-        """Mark all unread notifications for a user as read."""
-        return self.repo.mark_all_as_read(current_user_id)
+        """Mark all unread notifications for a user as read. Returns count of updated records."""
+        updated_count = self.repo.mark_all_as_read(current_user_id)
+        return {"updated_count": updated_count}
 
     async def send_notification(
         self, 
@@ -93,11 +97,12 @@ class NotificationService:
             listing_id=listing_id,
             type=type,
             title=title,
-            body=body
+            body=body,
         )
-        notification = self.repo.create(obj_in)
+        # Offload DB insert to threadpool to avoid blocking the event loop
+        notification = await anyio.to_thread.run_sync(self.repo.create, obj_in)
 
-        # Real-time broadcast
+        # Real-time broadcast (WebSocket)
         await manager.send_personal_message(
             user_id=user_id,
             message={
@@ -112,6 +117,24 @@ class NotificationService:
                 }
             }
         )
+
+        # Trigger Push Notification
+        try:
+            push_service = PushNotificationService(self.db)
+            await push_service.send_push_to_user(
+                user_id=user_id,
+                title=title,
+                body=body,
+                data={
+                    "notification_id": str(notification.id),
+                    "type": type,
+                    "order_id": str(order_id) if order_id else None,
+                    "listing_id": str(listing_id) if listing_id else None
+                }
+            )
+        except Exception as e:
+            # We don't want to fail the whole operation if push fails
+            pass
         
         return notification
 
