@@ -108,7 +108,9 @@ def get_reviews_by_user_id(
     db: Session = Depends(get_db)
 ):
     """Get all reviews received by a specific user id (not reviews written by that user)."""
-    return ReviewService(db).list_received_reviews(user_id=user_id, rating=rating, skip=skip, limit=limit)
+    return ReviewService(db).list_received_reviews(
+        user_id=user_id, rating=rating, skip=skip, limit=limit, variant="by_user"
+    )
 
 
 # ============================================================

@@ -62,6 +62,17 @@ class Settings(BaseSettings):
         description="Application log level"
     )
 
+    # AI / Gemini Settings
+    GEMINI_API_KEY: str = Field(..., description="Google Gemini API key")
+    GEMINI_EMBEDDING_MODEL: str = Field(
+        default="gemini-embedding-001",
+        description="Gemini embedding model ID"
+    )
+    EMBEDDING_DIMENSIONS: int = Field(
+        default=768,
+        description="Embedding vector dimensions"
+    )
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

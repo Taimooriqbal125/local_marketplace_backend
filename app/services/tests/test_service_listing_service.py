@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from sqlalchemy.orm import Session
 
+import app.services.service_listing_service as service_listing_module
 from app.services.service_listing_service import (
     ServiceListingService,
     ListingNotFoundError,
@@ -231,3 +232,95 @@ def test_list_listings_pagination(listing_service):
     args = listing_service.repo.get_filtered.call_args[1]
     assert args["skip"] == 20
     assert args["limit"] == 10
+
+
+# ── CACHE Tests ───────────────────────────────────────────────────────────
+
+def test_list_listings_cache_hit_bypasses_repo(listing_service, monkeypatch):
+    """A cached browse page must be served without touching the repository."""
+    cached_payload = {"total": 0, "page": 2, "page_size": 10, "results": []}
+    monkeypatch.setattr(service_listing_module, "get_cache_sync", lambda key: cached_payload)
+
+    result = listing_service.list_listings(page=2, page_size=10)
+
+    assert result.page == 2
+    assert result.page_size == 10
+    listing_service.repo.get_filtered.assert_not_called()
+
+
+def test_list_listings_cache_miss_stores_response(listing_service, monkeypatch):
+    """On a cache miss the browse page is stored with the listings TTL."""
+    stored = {}
+    monkeypatch.setattr(service_listing_module, "get_cache_sync", lambda key: None)
+    monkeypatch.setattr(
+        service_listing_module,
+        "set_cache_sync",
+        lambda key, value, expire=60: stored.update(key=key, value=value, expire=expire),
+    )
+    listing_service.repo.get_filtered.return_value = ([], 0)
+
+    result = listing_service.list_listings(page=1, page_size=10)
+
+    assert result.total == 0
+    listing_service.repo.get_filtered.assert_called_once()
+    assert stored["key"].startswith("listings:browse:")
+    assert stored["expire"] == ServiceListingService.CACHE_TTL_SECONDS
+    assert stored["value"]["page"] == 1
+
+
+def test_create_listing_invalidates_cache(listing_service, monkeypatch):
+    """Listing writes must wipe every cached listings key."""
+    invalidated = []
+    monkeypatch.setattr(service_listing_module, "delete_cache_pattern_sync", invalidated.append)
+    obj_in = ServiceListingCreate(
+        title="Cache Bust", description="Unique Desc", price_type="hourly",
+        is_negotiable=True, price_amount=20, service_location="Loc",
+        service_radius_km=5, category_id=uuid.uuid4(), city_id=uuid.uuid4()
+    )
+    listing_service.repo.get_by_title_and_description.return_value = None
+    listing_service.repo.create.return_value = MockListing(title="Cache Bust")
+
+    listing_service.create_listing(obj_in, uuid.uuid4())
+
+    assert invalidated == ["listings:*"]
+
+
+def test_params_digest_is_stable_and_filter_sensitive(listing_service):
+    """Same params → same digest; user-specific filters MUST change it."""
+    base = {
+        "status": "active",
+        "page": 1,
+        "page_size": 20,
+        "exclude_seller_id": None,
+    }
+    digest_a = listing_service._params_digest(base)
+    digest_b = listing_service._params_digest(dict(base))
+    assert digest_a == digest_b
+
+    personalized = dict(base, exclude_seller_id=uuid.uuid4())
+    assert listing_service._params_digest(personalized) != digest_a
+
+
+def test_nearby_cache_key_rounds_coordinates(listing_service, monkeypatch):
+    """Coordinates differing beyond 3 decimals must share one cache entry."""
+    stored_keys = []
+    monkeypatch.setattr(
+        service_listing_module,
+        "set_cache_sync",
+        lambda key, value, expire=60: stored_keys.append(key),
+    )
+    listing_service.repo.get_nearby.return_value = ([], 0)
+
+    listing_service.search_nearby(latitude=31.52041, longitude=74.35021)
+    listing_service.repo.get_nearby.assert_called_once()
+
+    monkeypatch.setattr(
+        service_listing_module,
+        "get_cache_sync",
+        lambda key: {"total": 0, "page": 1, "page_size": 20, "radius_km": 10.0, "results": []},
+    )
+
+    result = listing_service.search_nearby(latitude=31.52042, longitude=74.35022)
+
+    assert listing_service.repo.get_nearby.call_count == 1
+    assert stored_keys and result.total == 0

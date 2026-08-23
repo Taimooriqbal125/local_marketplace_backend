@@ -12,6 +12,7 @@ from .websocket_routes import router as websocket_router
 from .refresh_token_routes import router as refresh_token_router
 from .otp_token_route import router as otp_token_router
 from .user_device_token_routes import router as user_device_token_router
+from app.ai.routes import ai_router
 
 # Main API Router that aggregates all resource routers
 api_router = APIRouter()
@@ -30,4 +31,5 @@ api_router.include_router(websocket_router)
 api_router.include_router(refresh_token_router)
 api_router.include_router(otp_token_router)
 api_router.include_router(user_device_token_router)
+api_router.include_router(ai_router)
 

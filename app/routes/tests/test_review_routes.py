@@ -234,10 +234,11 @@ def test_get_reviews_by_user_id_returns_200_and_payload(
 	review_id = uuid4()
 	user_id = uuid4()
 
-	def _fake_list_received_reviews(self, user_id, rating=None, skip=0, limit=20):
+	def _fake_list_received_reviews(self, user_id, rating=None, skip=0, limit=20, *, variant="received"):
 		assert skip == 1
 		assert limit == 5
 		assert rating == 4
+		assert variant == "by_user"
 		return [
 			{
 				"id": review_id,

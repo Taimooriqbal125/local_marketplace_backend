@@ -11,12 +11,15 @@ Responsibilities:
 
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from decimal import Decimal
 from typing import Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from app.core.cache import delete_cache_pattern_sync, get_cache_sync, set_cache_sync
 from app.repositories.service_listing_repo import ServiceListingRepository
 from app.repositories.profile_repo import ProfileRepository
 from geoalchemy2.shape import to_shape
@@ -105,8 +108,50 @@ class ServiceListingService:
     Instantiated per-request via FastAPI dependency injection.
     """
 
+    # Listings are volatile (sellers edit constantly), so a short TTL keeps
+    # perceived staleness under control while still absorbing read bursts.
+    CACHE_TTL_SECONDS = 120
+    CACHE_NAMESPACE = "listings"
+
     def __init__(self, db: Session) -> None:
         self.repo = ServiceListingRepository(db)
+
+    # ── Cache helpers ────────────────────────────────────────────────────────
+
+    def _cache_key(self, suffix: str) -> str:
+        return f"{self.CACHE_NAMESPACE}:{suffix}"
+
+    def _params_digest(self, params: dict) -> str:
+        """Stable short digest over the non-None filter params for cache keys.
+
+        Every parameter that can change the result MUST be included —
+        omitting one would serve one user's cached results to another.
+        """
+        payload = {k: str(v) for k, v in sorted(params.items()) if v is not None}
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
+
+    def _read_cached_response(self, cache_key: str):
+        try:
+            return get_cache_sync(cache_key)
+        except Exception:
+            return None
+
+    def _cache_response(self, cache_key: str, response) -> None:
+        try:
+            set_cache_sync(
+                cache_key,
+                response.model_dump(mode="json"),
+                expire=self.CACHE_TTL_SECONDS,
+            )
+        except Exception:
+            return
+
+    def _invalidate_cache(self) -> None:
+        try:
+            delete_cache_pattern_sync(f"{self.CACHE_NAMESPACE}:*")
+        except Exception:
+            return
 
     @staticmethod
     def _validate_pricing_rules(*, price_type: str, is_negotiable: bool) -> None:
@@ -125,10 +170,20 @@ class ServiceListingService:
 
     def get_listing(self, listing_id: uuid.UUID) -> ServiceListingDetailResponse:
         """Fetch a single listing by ID. Raises 404 if not found."""
+        cache_key = self._cache_key(f"detail:{listing_id}")
+        cached = self._read_cached_response(cache_key)
+        if cached is not None:
+            try:
+                return ServiceListingDetailResponse.model_validate(cached)
+            except Exception:
+                pass  # stale payload shape — fall through to the database
+
         listing = self.repo.get(listing_id)
         if not listing:
             raise ListingNotFoundError(listing_id)
-        return ServiceListingDetailResponse.model_validate(listing)
+        response = ServiceListingDetailResponse.model_validate(listing)
+        self._cache_response(cache_key, response)
+        return response
 
     def list_listings(
         self,
@@ -154,6 +209,33 @@ class ServiceListingService:
         Browse listings with optional filters.
         Returns a paginated response with total count metadata.
         """
+        cache_key = self._cache_key(
+            "browse:" + self._params_digest({
+                "status": status,
+                "category_id": category_id,
+                "city_id": city_id,
+                "seller_id": seller_id,
+                "exclude_seller_id": exclude_seller_id,
+                "is_negotiable": is_negotiable,
+                "price_type": price_type,
+                "min_price": min_price,
+                "max_price": max_price,
+                "search": search,
+                "top_selling": top_selling,
+                "top_rating": top_rating,
+                "city_slug": city_slug,
+                "category_slug": category_slug,
+                "page": page,
+                "page_size": page_size,
+            })
+        )
+        cached = self._read_cached_response(cache_key)
+        if cached is not None:
+            try:
+                return ServiceListingPublicListResponse.model_validate(cached)
+            except Exception:
+                pass  # stale payload shape — fall through to the database
+
         skip = (page - 1) * page_size
         results, total = self.repo.get_filtered(
             status=status,
@@ -173,12 +255,14 @@ class ServiceListingService:
             skip=skip,
             limit=page_size,
         )
-        return ServiceListingPublicListResponse(
+        response = ServiceListingPublicListResponse(
             total=total,
             page=page,
             page_size=page_size,
             results=[ServiceListingPublicResponse.model_validate(r) for r in results],
         )
+        self._cache_response(cache_key, response)
+        return response
 
     def list_profile_listing_summaries(
         self,
@@ -204,6 +288,32 @@ class ServiceListingService:
         Return lightweight listing cards for a specific profile/user.
         Useful for profile storefronts where only name/photo/price are needed.
         """
+        cache_key = self._cache_key(
+            f"profile:{profile_id}:" + self._params_digest({
+                "status": status,
+                "category_id": category_id,
+                "city_id": city_id,
+                "exclude_seller_id": exclude_seller_id,
+                "is_negotiable": is_negotiable,
+                "price_type": price_type,
+                "min_price": min_price,
+                "max_price": max_price,
+                "search": search,
+                "top_selling": top_selling,
+                "top_rating": top_rating,
+                "city_slug": city_slug,
+                "category_slug": category_slug,
+                "page": page,
+                "page_size": page_size,
+            })
+        )
+        cached = self._read_cached_response(cache_key)
+        if cached is not None:
+            try:
+                return ServiceListingProfileSummaryListResponse.model_validate(cached)
+            except Exception:
+                pass  # stale payload shape — fall through to the database
+
         skip = (page - 1) * page_size
         results, total = self.repo.get_filtered(
             status=status,
@@ -223,7 +333,7 @@ class ServiceListingService:
             skip=skip,
             limit=page_size,
         )
-        return ServiceListingProfileSummaryListResponse(
+        response = ServiceListingProfileSummaryListResponse(
             profile_id=profile_id,
             total_services=total,
             page=page,
@@ -233,6 +343,8 @@ class ServiceListingService:
                 for r in results
             ],
         )
+        self._cache_response(cache_key, response)
+        return response
 
     def list_my_listings(
         self,
@@ -303,6 +415,7 @@ class ServiceListingService:
             raise DuplicateListingError()
 
         listing = self.repo.create(obj_in, seller_id=seller_id)
+        self._invalidate_cache()
         return ServiceListingResponse.model_validate(listing)
 
     def update_listing(
@@ -360,6 +473,7 @@ class ServiceListingService:
                     raise DuplicateListingError()
 
         updated = self.repo.update(listing, obj_in)
+        self._invalidate_cache()
         return ServiceListingResponse.model_validate(updated)
 
     def delete_listing(
@@ -381,6 +495,7 @@ class ServiceListingService:
             raise ListingForbiddenError()
             
         self.repo.delete(listing)
+        self._invalidate_cache()
 
     # ── Admin Operations ─────────────────────────────────────────────────────
 
@@ -408,6 +523,7 @@ class ServiceListingService:
             raise ListingNotFoundError(listing_id)
         update = ServiceListingUpdate(status="banned")
         updated = self.repo.update(listing, update)
+        self._invalidate_cache()
         return ServiceListingResponse.model_validate(updated)
 
     # ── Nearby Search ────────────────────────────────────────────────────────
@@ -435,6 +551,37 @@ class ServiceListingService:
         Find active listings whose coverage radius includes the given point.
         Returns results sorted closest-first with distance_km attached.
         """
+        # Raw GPS coordinates change on every request, so cache keys use a
+        # ~110 m grid (3 decimals). The query itself still uses the raw point;
+        # worst case a hit serves results computed for a nearby grid cell,
+        # acceptable at this radius/TTL. exclude_seller_id is user-specific
+        # and MUST be part of the key to avoid cross-user leakage.
+        lat_key = round(latitude, 3)
+        lng_key = round(longitude, 3)
+        cache_key = self._cache_key(
+            f"nearby:{lat_key}:{lng_key}:" + self._params_digest({
+                "radius_km": radius_km,
+                "status": status,
+                "category_id": category_id,
+                "exclude_seller_id": exclude_seller_id,
+                "is_negotiable": is_negotiable,
+                "price_type": price_type,
+                "min_price": min_price,
+                "max_price": max_price,
+                "search": search,
+                "top_selling": top_selling,
+                "top_rating": top_rating,
+                "page": page,
+                "page_size": page_size,
+            })
+        )
+        cached = self._read_cached_response(cache_key)
+        if cached is not None:
+            try:
+                return ServiceListingNearbyListResponse.model_validate(cached)
+            except Exception:
+                pass  # stale payload shape — fall through to the database
+
         skip = (page - 1) * page_size
         results, total = self.repo.get_nearby(
             latitude=latitude,
@@ -458,13 +605,15 @@ class ServiceListingService:
             payload = ServiceListingResponse.map_relationships(listing)
             payload["distance_km"] = float(distance_km)
             items.append(ServiceListingNearbyResponse.model_validate(payload))
-        return ServiceListingNearbyListResponse(
+        response = ServiceListingNearbyListResponse(
             total=total,
             page=page,
             page_size=page_size,
             radius_km=radius_km,
             results=items,
         )
+        self._cache_response(cache_key, response)
+        return response
 
     def search_nearby_from_profile(
         self,

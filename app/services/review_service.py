@@ -12,7 +12,13 @@ from sqlalchemy.orm import Session
 from app.repositories.review_repo import ReviewRepository
 from app.repositories.order_repo import OrderRepository
 from app.repositories.profile_repo import ProfileRepository
-from app.schemas.review import ReviewCreate
+from app.core.cache import delete_cache_pattern_sync, get_cache_sync, set_cache_sync
+from app.schemas.base import BaseSchema
+from app.schemas.review import (
+    ReviewCreate,
+    ReviewReceivedResponse,
+    ReviewByUserResponse,
+)
 from app.models.review import Review
 from app.services.notification_service import NotificationService
 from app.models.notification import NotificationType
@@ -47,12 +53,30 @@ class ReviewNotFoundError(HTTPException):
 class ReviewService:
     """Enhanced Service layer for Review business logic."""
 
+    CACHE_TTL_SECONDS = 120
+    CACHE_NAMESPACE = "reviews"
+
+    # The two readers of received reviews serialize into incompatible shapes
+    # (flat reviewer_name/service_title vs nested reviewer/note), so each
+    # variant gets its own cache keyspace instead of sharing one payload.
+    _RECEIVED_VARIANTS = {
+        "received": ReviewReceivedResponse,
+        "by_user": ReviewByUserResponse,
+    }
+
     def __init__(self, db: Session) -> None:
         self.db = db
         self.repo = ReviewRepository(db)
         self.order_repo = OrderRepository(db)
         self.profile_repo = ProfileRepository(db)
         self.notification_service = NotificationService(db)
+
+    def _invalidate_received_cache(self, user_id: uuid.UUID) -> None:
+        """Wipe every cached received-review page for one user (all variants)."""
+        try:
+            delete_cache_pattern_sync(f"{self.CACHE_NAMESPACE}:*:{user_id}:*")
+        except Exception:
+            return
 
     async def create_review(self, obj_in: ReviewCreate, current_user_id: uuid.UUID) -> Review:
         """
@@ -89,6 +113,9 @@ class ReviewService:
         # 6. Update Seller Reputation in Profile
         self.profile_repo.update_seller_rating(reviewed_user_id, obj_in.rating)
 
+        # The seller's cached review pages are now stale
+        self._invalidate_received_cache(reviewed_user_id)
+
         # 7. Trigger Notification for Seller
         reviewer_profile = self.profile_repo.get_by_user_id(current_user_id)
         reviewer_name = reviewer_profile.name if reviewer_profile else "A Buyer"
@@ -115,10 +142,55 @@ class ReviewService:
         return review
 
     def list_received_reviews(
-        self, user_id: uuid.UUID, rating: Optional[int] = None, skip: int = 0, limit: int = 20
-    ) -> List[Review]:
-        """Fetch reviews received by a user with optional rating filter."""
-        return self.repo.get_received_by_user(user_id, rating=rating, skip=skip, limit=limit)
+        self,
+        user_id: uuid.UUID,
+        rating: Optional[int] = None,
+        skip: int = 0,
+        limit: int = 20,
+        *,
+        variant: str = "received",
+    ) -> List[BaseSchema]:
+        """
+        Fetch reviews received by a user with optional rating filter.
+
+        Returns validated response models for the requested variant
+        ("received" → ReviewReceivedResponse, "by_user" → ReviewByUserResponse)
+        served from the cache when possible.
+        """
+        try:
+            schema = self._RECEIVED_VARIANTS[variant]
+        except KeyError:
+            raise ValueError(f"Unknown review variant '{variant}'")
+
+        cache_key = (
+            f"{self.CACHE_NAMESPACE}:{variant}:{user_id}:"
+            f"{rating if rating is not None else 'all'}:{skip}:{limit}"
+        )
+
+        try:
+            cached_items = get_cache_sync(cache_key)
+        except Exception:
+            cached_items = None
+
+        if cached_items is not None:
+            try:
+                return [schema.model_validate(item) for item in cached_items]
+            except Exception:
+                pass  # stale payload shape — fall through to the database
+
+        reviews = self.repo.get_received_by_user(user_id, rating=rating, skip=skip, limit=limit)
+        results = [schema.model_validate(review) for review in reviews]
+
+        try:
+            set_cache_sync(
+                cache_key,
+                [item.model_dump(mode="json") for item in results],
+                expire=self.CACHE_TTL_SECONDS,
+            )
+        except Exception:
+            return results
+
+        return results
 
     def list_given_reviews(self, user_id: uuid.UUID, skip: int = 0, limit: int = 20) -> List[Review]:
         """Fetch reviews written by a user."""
@@ -138,6 +210,7 @@ class ReviewService:
             raise ReviewForbiddenError("Only the author can delete this review")
             
         self.repo.delete(review)
+        self._invalidate_received_cache(review.reviewedUserId)
 
     def list_all_reviews(
         self,

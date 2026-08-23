@@ -59,6 +59,18 @@ class OrderService:
         phone = profile.user.phone if profile.user else "N/A"
         return name, email, phone
 
+    @staticmethod
+    def _ensure_relations_loaded(order: "Order") -> None:
+        """Force all relationships to load before returning to prevent
+        lazy-loading during response serialization on a committed session."""
+        _ = order.listing
+        _ = order.listing.media
+        _ = order.listing.category
+        _ = order.seller
+        _ = order.seller.profile
+        _ = order.buyer
+        _ = order.buyer.profile
+
     async def create_order(self, obj_in: OrderCreate, buyer_id: uuid.UUID):
         """Create a new order request."""
         listing = self.listing_repo.get(obj_in.listing_id)
@@ -83,6 +95,11 @@ class OrderService:
             body=f"{buyer_name} has requested your service '{listing.title}'. You may contact them at {buyer_email} or {buyer_phone}."
         )
 
+        # Force all relationships to load before returning to prevent
+        # lazy-loading during response serialization on a committed session
+        if order_with_relations:
+            self._ensure_relations_loaded(order_with_relations)
+
         return order_with_relations or order
 
     async def get_order(self, order_id: uuid.UUID, current_user_id: uuid.UUID) -> Order:
@@ -93,6 +110,9 @@ class OrderService:
         
         if order.buyerId != current_user_id and order.sellerId != current_user_id:
             raise OrderForbiddenError()
+
+        # Force all relationships to load before returning
+        self._ensure_relations_loaded(order)
             
         return order
 
@@ -132,7 +152,9 @@ class OrderService:
         order = await self.get_order(order_id, current_user_id=current_user_id)
         
         if not obj_in.status:
-            return self.repo.update(order, obj_in)
+            updated = self.repo.update(order, obj_in)
+            self._ensure_relations_loaded(updated)
+            return updated
 
         if obj_in.status == "accepted":
             return await self._accept_order(order, obj_in.agreed_price, current_user_id)
@@ -141,7 +163,9 @@ class OrderService:
         elif obj_in.status == "cancelled":
             return await self._cancel_order(order, obj_in, current_user_id)
             
-        return self.repo.update(order, obj_in)
+        updated = self.repo.update(order, obj_in)
+        self._ensure_relations_loaded(updated)
+        return updated
 
     async def _accept_order(self, order: Order, agreed_price, current_user_id: uuid.UUID) -> Order:
         if order.sellerId != current_user_id:
@@ -161,6 +185,7 @@ class OrderService:
             title="Order Accepted",
             body=f"Your order request has been accepted by {seller_name}. You may contact them at {seller_email} or {seller_phone}."
         )
+        self._ensure_relations_loaded(updated_order)
         return updated_order
 
     async def _complete_order(self, order: Order, current_user_id: uuid.UUID) -> Order:
@@ -185,6 +210,7 @@ class OrderService:
                 title="Buyer Confirmed Completion",
                 body=f"{buyer_name} has marked the order as completed. Please finalize it."
             )
+            self._ensure_relations_loaded(updated_order)
             return updated_order
             
         if is_seller:
@@ -204,8 +230,9 @@ class OrderService:
                 order_id=order.id,
                 type=NotificationType.ORDER_COMPLETED,
                 title="Order Finalized",
-                body=f"{seller_name} has finalized the order. We’d appreciate it if you could leave a review."
+                body=f"{seller_name} has finalized the order. We'd appreciate it if you could leave a review."
             )
+            self._ensure_relations_loaded(result)
             return result
 
         raise OrderForbiddenError("Unauthorized role")
@@ -229,6 +256,7 @@ class OrderService:
             title="Order Cancelled",
             body=f"{canceller_name} has cancelled the order. You may try placing another request later."
         )
+        self._ensure_relations_loaded(updated_order)
         return updated_order
 
     def cleanup_cancelled_orders(self, retention_days: Optional[int] = None) -> dict[str, int]:

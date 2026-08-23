@@ -4,11 +4,13 @@ Focuses on validation rules (order state, ownership), reputation updates, and ad
 """
 
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
 
+import app.services.review_service as review_service_module
 from app.services.review_service import (
     ReviewService,
     ReviewNotFoundError,
@@ -199,3 +201,88 @@ def test_list_all_reviews_admin_only(review_service):
     # Act & Assert (Regular)
     with pytest.raises(ReviewForbiddenError):
         review_service.list_all_reviews(regular_user)
+
+
+# ── CACHE Tests ───────────────────────────────────────────────────────────
+
+def test_list_received_reviews_by_user_cache_hit(review_service, monkeypatch):
+    """Cached by_user pages must be served without querying the repository."""
+    cached_payload = [
+        {
+            "id": str(uuid.uuid4()),
+            "rating": 5,
+            "note": "Good",
+            "created_at": datetime(2026, 4, 28, tzinfo=timezone.utc).isoformat(),
+            "reviewer": {"id": str(uuid.uuid4()), "name": "Reviewer", "photo_url": None},
+        }
+    ]
+    monkeypatch.setattr(review_service_module, "get_cache_sync", lambda key: cached_payload)
+
+    result = review_service.list_received_reviews(uuid.uuid4(), variant="by_user")
+
+    assert len(result) == 1
+    assert result[0].note == "Good"
+    assert result[0].reviewer.name == "Reviewer"
+    review_service.repo.get_received_by_user.assert_not_called()
+
+
+def test_list_received_reviews_cache_miss_stores_results(review_service, monkeypatch):
+    """On a miss the fetched page is stored under the variant keyspace."""
+    stored = {}
+    monkeypatch.setattr(review_service_module, "get_cache_sync", lambda key: None)
+    monkeypatch.setattr(
+        review_service_module,
+        "set_cache_sync",
+        lambda key, value, expire=60: stored.update(key=key, value=value, expire=expire),
+    )
+    review_service.repo.get_received_by_user.return_value = []
+
+    results = review_service.list_received_reviews(
+        uuid.uuid4(), rating=4, skip=1, limit=5, variant="by_user"
+    )
+
+    assert results == []
+    review_service.repo.get_received_by_user.assert_called_once()
+    assert stored["key"].startswith("reviews:by_user:")
+    assert stored["expire"] == ReviewService.CACHE_TTL_SECONDS
+
+
+def test_list_received_reviews_unknown_variant_raises(review_service):
+    """Unknown variants must fail loudly instead of silently skipping cache."""
+    with pytest.raises(ValueError, match="Unknown review variant"):
+        review_service.list_received_reviews(uuid.uuid4(), variant="bogus")
+
+
+@pytest.mark.anyio
+async def test_create_review_invalidates_received_cache(review_service, monkeypatch):
+    """Creating a review busts the seller's cached received-review pages."""
+    invalidated = []
+    monkeypatch.setattr(review_service_module, "delete_cache_pattern_sync", invalidated.append)
+
+    buyer_id = uuid.uuid4()
+    seller_id = uuid.uuid4()
+    order_id = uuid.uuid4()
+    obj_in = ReviewCreate(order_id=order_id, rating=5)
+    review_service.order_repo.get.return_value = MockOrder(id=order_id, buyerId=buyer_id, sellerId=seller_id)
+    review_service.repo.get_by_order.return_value = []
+    review_service.repo.create.return_value = MockReview(reviewerId=buyer_id, orderId=order_id, rating=5)
+    review_service.profile_repo.get_by_user_id.return_value = MagicMock(name="Buyer Name")
+
+    await review_service.create_review(obj_in, buyer_id)
+
+    assert invalidated == [f"reviews:*:{seller_id}:*"]
+
+
+def test_delete_review_invalidates_received_cache(review_service, monkeypatch):
+    """Deleting a review busts the reviewed user's cached pages."""
+    invalidated = []
+    monkeypatch.setattr(review_service_module, "delete_cache_pattern_sync", invalidated.append)
+
+    reviewer_id = uuid.uuid4()
+    reviewed_user_id = uuid.uuid4()
+    mock_review = MockReview(reviewerId=reviewer_id, reviewedUserId=reviewed_user_id)
+    review_service.repo.get.return_value = mock_review
+
+    review_service.delete_review(mock_review.id, reviewer_id)
+
+    assert invalidated == [f"reviews:*:{reviewed_user_id}:*"]

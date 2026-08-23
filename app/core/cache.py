@@ -72,10 +72,15 @@ def _delete_cache_sync(key: str):
 
 
 def _delete_cache_pattern_sync(pattern: str):
-    keys = redis.keys(pattern)
-    if keys:
-        redis.delete(*keys)
-        logger.info("Cache pattern invalidated", pattern=pattern, deleted=len(keys))
+    # SCAN instead of KEYS: KEYS blocks Redis while scanning the whole
+    # keyspace; scan_iter pages through with a cursor and never blocks.
+    deleted_count = 0
+    for key in redis.scan_iter(match=pattern, count=200):
+        redis.delete(key)
+        deleted_count += 1
+
+    if deleted_count:
+        logger.info("Cache pattern invalidated", pattern=pattern, deleted=deleted_count)
     else:
         logger.info("No cache keys matched pattern", pattern=pattern)
 

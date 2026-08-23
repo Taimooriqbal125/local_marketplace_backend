@@ -57,7 +57,16 @@ pip-wheel-metadata/
 *.whl
 .idea/
 .python-version
-.env.local
 .env.*
 .ipynb_checkpoints/
 .cache/
+
+# Playwright MCP session artifacts
+.playwright-mcp/
+
+# graphify generated knowledge-graph output
+graphify-out/
+
+# Windows Explorer junk
+Thumbs.db
+Desktop.ini

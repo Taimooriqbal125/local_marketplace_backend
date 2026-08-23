@@ -34,6 +34,7 @@ from app.schemas.services_listing import (
 )
 from app.services.listing_media_service import ListingMediaService
 from app.services.service_listing_service import ServiceListingService
+from app.ai.services.embedding_service import EmbeddingService
 
 router = APIRouter(
     prefix="/services",
@@ -507,6 +508,15 @@ async def create_listing(
         if primary_image_url is not None:
             created_listing.image_url = primary_image_url
 
+    # Auto-sync embedding for the new listing
+    try:
+        from app.models.service_listing import ServiceListing
+        listing_obj = db.get(ServiceListing, created_listing.id)
+        if listing_obj:
+            await EmbeddingService(db).upsert_embedding(listing_obj)
+    except Exception:
+        pass  # Don't fail listing creation if embedding fails
+
     return created_listing
 
 
@@ -590,11 +600,18 @@ async def update_listing(
     listing = service.repo.get(listing_id)
     if listing is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Listing not found")
+
+    # Auto-sync embedding after update
+    try:
+        await EmbeddingService(db).upsert_embedding(listing)
+    except Exception:
+        pass  # Don't fail listing update if embedding fails
+
     return ServiceListingResponse.model_validate(listing)
 
 
 @router.delete("/{listing_id}", status_code=status.HTTP_200_OK)
-def delete_listing(
+async def delete_listing(
     listing_id: uuid.UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -608,4 +625,11 @@ def delete_listing(
         current_user_id=current_user.id,
         is_admin=current_user.is_admin
     )
+
+    # Auto-delete embedding after listing deletion
+    try:
+        await EmbeddingService(db).delete_embedding(listing_id)
+    except Exception:
+        pass  # Don't fail listing deletion if embedding cleanup fails
+
     return {"message": "Service listing deleted successfully."}

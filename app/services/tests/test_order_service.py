@@ -32,6 +32,13 @@ class MockOrder:
         self.buyerCompletedAt = kwargs.get("buyerCompletedAt", None)
         self.sellerCompletedAt = kwargs.get("sellerCompletedAt", None)
         self.cancelledAt = kwargs.get("cancelledAt", None)
+
+        # Relationships read by OrderService._ensure_relations_loaded()
+        # to force eager loading before response serialization.
+        self.listing = kwargs.get("listing", MagicMock(media=[], category=MagicMock()))
+        self.seller = kwargs.get("seller", MagicMock(profile=MagicMock()))
+        self.buyer = kwargs.get("buyer", MagicMock(profile=MagicMock()))
+
         for k, v in kwargs.items():
             setattr(self, k, v)
 
